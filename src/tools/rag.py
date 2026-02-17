@@ -62,8 +62,3 @@ def search_knowledge(query: str, n_results: int = 2):
         formatted_results.append(f"SOURCE PATH: {rel_path}\nCONTENT: {doc}")
 
     return "\n\n---\n\n".join(formatted_results)
-
-def search_knowledge(query: str, n_results: int = 2):
-    """Tool for the agent to look up past solutions."""
-    results = collection.query(query_texts=[query], n_results=n_results)
-    return "\n\n".join(results['documents'][0])

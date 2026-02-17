@@ -1,13 +1,15 @@
+from pathlib import Path
+
 from langchain_core.messages import HumanMessage
 from src.agent import graph
 from src.tools.rag import ingest_writeups
 from src.config import settings
 
 def main():
-    # 1. Prep data (RAG)
-    # Using settings for path management
-    print(f"Indexing past write-ups from {settings.knowledge_base_path}...")
-    ingest_writeups(settings.knowledge_base_path)
+    # Index the knowledge base using path from settings
+    kb_path = Path(settings.knowledge_base_path).resolve()
+    print(f"Indexing from {kb_path}...")
+    ingest_writeups(str(kb_path))
 
     # 2. Define the Challenge
     challenge_text = "I have a file at /challenge/task.bin. Find the flag."
@@ -23,9 +25,11 @@ def main():
         "logs": ["System: Challenge initialized."]
     }
 
+    config = {"recursion_limit": settings.max_iterations}
+
     # 4. Stream the Tiered Execution
     # Using 'updates' mode to see exactly what each node contributes
-    for output in graph.stream(inputs, stream_mode="updates"):
+    for output in graph.stream(inputs,config=config, stream_mode="updates"):
         for node_name, node_update in output.items():
             print(f"\n{'='*20} Node: {node_name} {'='*20}")
 

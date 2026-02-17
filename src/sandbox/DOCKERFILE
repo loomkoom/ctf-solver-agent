@@ -1,7 +1,17 @@
 FROM kalilinux/kali-rolling
-RUN apt-get update && apt-get install -y \
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Combine all system dependencies and tools into one layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    wget \
+    python3 \
+    python3-pip \
+    python3-dev \
+    ruby \
+    ruby-dev \
+    build-essential \
     nmap \
     python3-pwntools \
     sqlmap \
@@ -10,41 +20,35 @@ RUN apt-get update && apt-get install -y \
     exiftool \
     radare2 \
     gdb \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
-
-# --- Specialist Tools for CTF Agent ---
-# 1. Pwn Environment
-RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg && \
-    cd /opt/pwndbg && ./setup.sh
-RUN bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
-
-# 2. Ruby-based Tools
-RUN gem install zsteg one_gadget
-
-# 3. Python Specialists
-RUN pip3 install --no-cache-dir \
+RUN gem install zsteg one_gadget \
+    && pip3 install --no-cache-dir --break-system-packages \
     ropgadget \
     pwntools \
     ciphey \
     factordb-pycli \
-    RsaCtfTool
+    RsaCtfTool \
+    slither-analyzer \
+    graphw00f
 
-# 4. Fast Stego Cracker
-RUN wget https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb && \
-    apt install ./stegseek_0.6-1_amd64.deb
+# Install Pwn tools in a dedicated block
+# pwndbg is heavy; keeping it separate helps if you need to tweak pwn logic without re-running apt
+RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg && \
+    cd /opt/pwndbg && ./setup.sh && \
+    bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
 
-# --- Web3 & Modern Web ---
-RUN pip3 install slither-analyzer graphw00f
+# 3. External binary downloads
+RUN wget -q https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb -O /tmp/stegseek.deb && \
+    apt-get update && apt-get install -y /tmp/stegseek.deb && \
+    wget -q https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit && \
+    chmod +x /usr/local/bin/pwninit && \
+    curl -sSfL https://raw.githubusercontent.com/aquasecurity/kube-hunter/main/install.sh | sh && \
+    rm -rf /tmp/* /var/lib/apt/lists/*
 
-# --- Cloud & Container Security ---
-RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/kube-hunter/main/install.sh | sh
-
-# --- Pwn Automation ---
-RUN wget https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit && \
-    chmod +x /usr/local/bin/pwninit
-
+# 4. Final configuration
 WORKDIR /challenge
+
 COPY . .
+
 CMD ["python3", "src/main.py"]
-
-
