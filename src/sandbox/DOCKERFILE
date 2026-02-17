@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
+    pipx \
     ruby \
     ruby-dev \
     build-essential \
@@ -22,29 +23,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gdb \
     xz-utils \
     && rm -rf /var/lib/apt/lists/*
-RUN gem install zsteg one_gadget \
-    && pip3 install --no-cache-dir --break-system-packages \
+
+RUN gem install zsteg one_gadget
+RUN pipx install \
+    git+https://github.com/RsaCtfTool/RsaCtfTool \
     ropgadget \
     pwntools \
-    ciphey \
     factordb-pycli \
-    RsaCtfTool \
-    slither-analyzer \
-    graphw00f
+    slither-analyzer
+#     ciphey \
+#     graphw00f
 
 # Install Pwn tools in a dedicated block
 # pwndbg is heavy; keeping it separate helps if you need to tweak pwn logic without re-running apt
-RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg && \
-    cd /opt/pwndbg && ./setup.sh && \
-    bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
+RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg \
+    && cd /opt/pwndbg && ./setup.sh \
+    && bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
 
 # 3. External binary downloads
-RUN wget -q https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb -O /tmp/stegseek.deb && \
-    apt-get update && apt-get install -y /tmp/stegseek.deb && \
-    wget -q https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit && \
-    chmod +x /usr/local/bin/pwninit && \
-    curl -sSfL https://raw.githubusercontent.com/aquasecurity/kube-hunter/main/install.sh | sh && \
-    rm -rf /tmp/* /var/lib/apt/lists/*
+# - stegseek
+# - pwninit
+# - kube-hunter
+# RUN wget -q https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb -O /tmp/stegseek.deb && \
+#     apt-get update && apt-get install -y /tmp/stegseek.deb && \
+#     wget -q https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit && \
+#     chmod +x /usr/local/bin/pwninit && \
+#     curl -sSfL https://raw.githubusercontent.com/aquasecurity/kube-hunter/main/install.sh | sh && \
+#     rm -rf /tmp/* /var/lib/apt/lists/*
 
 # 4. Final configuration
 WORKDIR /challenge
