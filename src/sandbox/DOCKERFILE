@@ -1,0 +1,50 @@
+FROM kalilinux/kali-rolling
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    nmap \
+    python3-pwntools \
+    sqlmap \
+    ffuf \
+    binwalk \
+    exiftool \
+    radare2 \
+    gdb \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Specialist Tools for CTF Agent ---
+# 1. Pwn Environment
+RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg && \
+    cd /opt/pwndbg && ./setup.sh
+RUN bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
+
+# 2. Ruby-based Tools
+RUN gem install zsteg one_gadget
+
+# 3. Python Specialists
+RUN pip3 install --no-cache-dir \
+    ropgadget \
+    pwntools \
+    ciphey \
+    factordb-pycli \
+    RsaCtfTool
+
+# 4. Fast Stego Cracker
+RUN wget https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb && \
+    apt install ./stegseek_0.6-1_amd64.deb
+
+# --- Web3 & Modern Web ---
+RUN pip3 install slither-analyzer graphw00f
+
+# --- Cloud & Container Security ---
+RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/kube-hunter/main/install.sh | sh
+
+# --- Pwn Automation ---
+RUN wget https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit && \
+    chmod +x /usr/local/bin/pwninit
+
+WORKDIR /challenge
+COPY . .
+CMD ["python3", "src/main.py"]
+
+
