@@ -1,3 +1,5 @@
+from typing import Literal
+
 from src.config import settings
 from src.state import AgentState
 from src.tools.bash import run_bash_in_sandbox
@@ -39,7 +41,11 @@ def architect_node(state: AgentState):
         "You are the Strategic Architect. Analyze the challenge and the following write-ups: "
         f"\n\n{retrieved_info}\n\n"
         "If a write-up has a SOURCE PATH, tell the Executor: 'check artifacts for [PATH]'. "
-        "Otherwise, set a technical objective for the next step. Do not write code."
+        "If RAG returns no relevant write-ups switch to First Principles Discovery: "
+        "1. Identify challenge input types (file, binwalk, netcat, curl). "
+        "2. Enumerate entry points (strings, nm, nmap). "
+        "3. Test standard vulnerabilities based on category. "
+        "Set a technical objective for the next step. Do not write code."
     ))
 
     context_msg = HumanMessage(content=f"CORE CHALLENGE CONTEXT: {state['challenge_context']}")
@@ -74,7 +80,7 @@ def executor_node(state: AgentState):
     result = run_bash_in_sandbox(cmd)
 
     # Format result as a clean string for AI readability
-    readable_res = f"STDOUT: {result.get('stdout')}\nSTDERR: {result.get('stderr')}"
+    readable_res = f"STDOUT: {result['stdout']}\nSTDERR: {result['stderr']}\nEXIT CODE: {result['exit_code']}"
 
     return {
         "messages": [
@@ -84,6 +90,20 @@ def executor_node(state: AgentState):
         "logs": [f"Executor ran: {cmd[:50]}"]
     }
 
+def should_continue(state: AgentState) -> Literal["architect", END]:
+    """Check if the flag was captured or if we reached the max iteration limit."""
+    # Look for common flag patterns in the latest messages or logs
+    last_message = state["messages"][-1].content
+    target = state.get("flag_format", "flag{").lower()
+    if target in last_message or "flag{" in last_message:
+        return END
+
+    # settings.max_iterations from your config.py
+    if len(state["logs"]) >= settings.max_iterations:
+        return END
+
+    return "architect"
+
 # --- Compile Workflow ---
 builder = StateGraph(AgentState)
 builder.add_node("architect", architect_node)
@@ -91,7 +111,7 @@ builder.add_node("executor", executor_node)
 
 builder.add_edge(START, "architect")
 builder.add_edge("architect", "executor")
-# Add a loop back to architect for re-planning
-builder.add_edge("executor", "architect")
+# Use the router to decide if we loop or end
+builder.add_conditional_edges("executor", should_continue)
 
 graph = builder.compile()
