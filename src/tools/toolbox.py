@@ -1,6 +1,7 @@
 import base64
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from src.tools.bash import SandboxRunner
 
@@ -17,8 +18,16 @@ class ToolResult:
 
 
 class Toolbox:
-    def __init__(self, runner: SandboxRunner | None = None):
-        self.runner = runner or SandboxRunner()
+    def __init__(self, runner: SandboxRunner | None = None, workdir: str | None = None):
+        if runner is None:
+            runner = SandboxRunner(workdir=workdir)
+        elif workdir:
+            runner.workdir = workdir
+        self.runner = runner
+
+    def set_workdir(self, workdir: str) -> None:
+        if workdir:
+            self.runner.workdir = workdir
 
     def run(self, command: str, tool_name: str = "bash") -> ToolResult:
         result = self.runner.run(command)
@@ -116,6 +125,81 @@ class Toolbox:
     def exiftool(self, path: str) -> ToolResult:
         return self.run(f"exiftool {self._shell_escape(path)}", tool_name="exiftool")
 
+    def foremost(self, path: str, out_dir: str | None = None, args: str = "") -> ToolResult:
+        dest = out_dir or f"{path}_foremost"
+        extra = (args or "").strip()
+        cmd = f"foremost -i {self._shell_escape(path)} -o {self._shell_escape(dest)}"
+        if extra:
+            cmd = f"{cmd} {extra}"
+        return self.run(cmd, tool_name="foremost")
+
+    def tshark(self, path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"tshark -r {self._shell_escape(path)}"
+        if extra:
+            cmd = f"{cmd} {extra}"
+        return self.run(cmd, tool_name="tshark")
+
+    def yara(self, rule_path: str, target_path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"yara {extra} {self._shell_escape(rule_path)} {self._shell_escape(target_path)}".strip()
+        return self.run(cmd, tool_name="yara")
+
+    def pdfinfo(self, path: str) -> ToolResult:
+        return self.run(f"pdfinfo {self._shell_escape(path)}", tool_name="pdfinfo")
+
+    def pdftotext(self, path: str, out_path: str | None = None, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        if out_path:
+            cmd = f"pdftotext {extra} {self._shell_escape(path)} {self._shell_escape(out_path)}".strip()
+        else:
+            cmd = f"pdftotext {extra} {self._shell_escape(path)} -".strip()
+        return self.run(cmd, tool_name="pdftotext")
+
+    def qpdf(self, path: str, out_path: str | None = None, args: str = "--check") -> ToolResult:
+        extra = (args or "").strip()
+        if out_path:
+            cmd = f"qpdf {extra} {self._shell_escape(path)} {self._shell_escape(out_path)}".strip()
+        else:
+            cmd = f"qpdf {extra} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="qpdf")
+
+    def pdf_parser(self, path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"pdf-parser {extra} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="pdf_parser")
+
+    def steghide(self, path: str, args: str = "info") -> ToolResult:
+        clean_args = (args or "info").strip()
+        if clean_args.startswith("extract"):
+            extra = clean_args[len("extract"):].strip()
+            cmd = f"steghide extract -sf {self._shell_escape(path)}"
+            if extra:
+                cmd = f"{cmd} {extra}"
+        elif clean_args.startswith("info"):
+            cmd = f"steghide info {self._shell_escape(path)}"
+        else:
+            cmd = f"steghide {clean_args} {self._shell_escape(path)}"
+        return self.run(cmd, tool_name="steghide")
+
+    def stegsnow(self, path: str, args: str = "") -> ToolResult:
+        cmd = f"stegsnow {args} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="stegsnow")
+
+    def pngcheck(self, path: str, args: str = "") -> ToolResult:
+        cmd = f"pngcheck {args} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="pngcheck")
+
+    def zbarimg(self, path: str, args: str = "") -> ToolResult:
+        cmd = f"zbarimg {args} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="zbarimg")
+
+    def qrencode(self, value: str, out_path: str | None = None, args: str = "") -> ToolResult:
+        dest = out_path or "qrcode.png"
+        extra = (args or "").strip()
+        cmd = f"qrencode {extra} -o {self._shell_escape(dest)} {self._shell_escape(value)}".strip()
+        return self.run(cmd, tool_name="qrencode")
+
     def stegseek(self, path: str, wordlist: str | None = None) -> ToolResult:
         if wordlist:
             return self.run(
@@ -127,6 +211,31 @@ class Toolbox:
     def zsteg(self, path: str) -> ToolResult:
         return self.run(f"zsteg {self._shell_escape(path)}", tool_name="zsteg")
 
+    def apktool(self, path: str, out_dir: str | None = None, args: str = "d") -> ToolResult:
+        extra = (args or "d").strip()
+        if out_dir:
+            cmd = f"apktool {extra} -o {self._shell_escape(out_dir)} {self._shell_escape(path)}"
+        else:
+            cmd = f"apktool {extra} {self._shell_escape(path)}"
+        return self.run(cmd, tool_name="apktool")
+
+    def jadx(self, path: str, out_dir: str | None = None, args: str = "") -> ToolResult:
+        dest = out_dir or f"{path}_jadx"
+        extra = (args or "").strip()
+        cmd = f"jadx {extra} -d {self._shell_escape(dest)} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="jadx")
+
+    def aapt(self, path: str, args: str = "dump badging") -> ToolResult:
+        extra = (args or "dump badging").strip()
+        cmd = f"aapt {extra} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="aapt")
+
+    def dex2jar(self, path: str, out_path: str | None = None, args: str = "") -> ToolResult:
+        dest = out_path or str(Path(path).with_suffix(".jar"))
+        extra = (args or "").strip()
+        cmd = f"d2j-dex2jar {extra} -o {self._shell_escape(dest)} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="dex2jar")
+
     def ciphey(self, text_or_path: str, args: str = "") -> ToolResult:
         base_args = args or "-f"
         cmd = f"ciphey {base_args} {self._shell_escape(text_or_path)}".strip()
@@ -137,12 +246,58 @@ class Toolbox:
         cmd = f"lemmeknow {flags} {args} {self._shell_escape(text_or_path)}".strip()
         return self.run(cmd, tool_name="lemmeknow")
 
+    def hashcat(self, hash_file: str, wordlist: str | None = None, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"hashcat {extra} {self._shell_escape(hash_file)}".strip()
+        if wordlist:
+            cmd = f"{cmd} {self._shell_escape(wordlist)}"
+        return self.run(cmd, tool_name="hashcat")
+
+    def john(self, hash_file: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"john {extra} {self._shell_escape(hash_file)}".strip()
+        return self.run(cmd, tool_name="john")
+
+    def hashid(self, value_or_path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"hashid {extra} {self._shell_escape(value_or_path)}".strip()
+        return self.run(cmd, tool_name="hashid")
+
+    def name_that_hash(self, value_or_path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"nth {extra} {self._shell_escape(value_or_path)}".strip()
+        return self.run(cmd, tool_name="name_that_hash")
+
+    def hashdeep(self, path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"hashdeep {extra} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="hashdeep")
+
     def ghidra_headless(self, project_dir: str, project_name: str, binary_path: str) -> ToolResult:
         cmd = (
             f"analyzeHeadless {self._shell_escape(project_dir)} "
             f"{self._shell_escape(project_name)} -import {self._shell_escape(binary_path)}"
         )
         return self.run(cmd, tool_name="ghidra_headless")
+
+    def ropgadget(self, binary_path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"ROPgadget --binary {self._shell_escape(binary_path)} {extra}".strip()
+        return self.run(cmd, tool_name="ropgadget")
+
+    def pwninit(self, binary_path: str | None = None, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = "pwninit"
+        if binary_path:
+            cmd = f"{cmd} --bin {self._shell_escape(binary_path)}"
+        if extra:
+            cmd = f"{cmd} {extra}"
+        return self.run(cmd, tool_name="pwninit")
+
+    def one_gadget(self, path: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"one_gadget {extra} {self._shell_escape(path)}".strip()
+        return self.run(cmd, tool_name="one_gadget")
 
     def radare2_json(self, binary_path: str, commands: str | list[str]) -> ToolResult:
         if isinstance(commands, list):
@@ -159,6 +314,11 @@ class Toolbox:
 
     def readelf(self, binary_path: str, args: str = "-a") -> ToolResult:
         return self.run(f"readelf {args} {self._shell_escape(binary_path)}", tool_name="readelf")
+
+    def slither(self, target: str, args: str = "") -> ToolResult:
+        extra = (args or "").strip()
+        cmd = f"slither {extra} {self._shell_escape(target)}".strip()
+        return self.run(cmd, tool_name="slither")
 
     # --- Execution ---
     def gdb_pwndbg(self, binary_path: str, gdb_commands: list[str] | None = None) -> ToolResult:

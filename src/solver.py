@@ -6,6 +6,7 @@ from pathlib import Path
 from src.agent import build_graph
 from src.config import settings
 from src.ctfd import CTFdConnector
+from src.debug_log import debug_log
 from src.state import DCipherState
 from src.trajectory import TrajectoryLogger
 from src.tools.toolbox import Toolbox
@@ -63,6 +64,7 @@ def run_solver(
         "attempt_history": [],
         "reasoning_log": [],
         "messages": [],
+        "run_id": run_id,
         "challenge_context": context,
         "flag_format": settings.flag_format,
         "current_objective": "Initial reconnaissance",
@@ -72,6 +74,7 @@ def run_solver(
         "selected_pipeline": "",
         "research_summary": "",
         "artifact_inventory": [],
+        "triage_done": False,
         "url": url or "",
         "container_dir": container_dir,
         "last_command": "",
@@ -89,9 +92,33 @@ def run_solver(
         "category_pivots": 0,
         "started_at": time.monotonic(),
         "run_dir": str(run_dir),
+        "tool_manuals_seen": [],
     }
 
+    debug_log(
+        settings.debug,
+        run_id,
+        str(challenge_id),
+        name,
+        "graph_invoke_start",
+        run_dir=str(run_dir),
+        container_dir=container_dir,
+    )
+    start = time.monotonic()
     final_state = graph.invoke(state)
+    duration = time.monotonic() - start
+    debug_log(
+        settings.debug,
+        run_id,
+        str(challenge_id),
+        name,
+        "graph_invoke_end",
+        duration_s=round(duration, 3),
+        done=final_state.get("done"),
+        iteration=final_state.get("iteration"),
+        tool_calls=final_state.get("tool_calls"),
+        phase_cycles=final_state.get("phase_cycles"),
+    )
     return {
         "challenge_id": challenge_id,
         "challenge_name": name,

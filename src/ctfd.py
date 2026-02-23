@@ -33,6 +33,14 @@ class CTFdConnector:
         elif username and password:
             self.login(username, password)
 
+        self.session.headers.update(
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "ig-ctf-solver/1.0",
+            }
+        )
+
     def login(self, username: str, password: str) -> None:
         login_api = f"{self.base_url}/api/v1/users/login"
         resp = self.session.post(
@@ -76,8 +84,10 @@ class CTFdConnector:
     def download_challenge_files(self, challenge_id: int, dest_dir: Path) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
         saved = []
+
         for ctf_file in self.get_challenge_files(challenge_id):
-            data = self.session.get(ctf_file.url, timeout=self.timeout_s)
+            file_url = f"{self.base_url}/files/{ctf_file.url}"
+            data = self.session.get(file_url , timeout=self.timeout_s)
             if not data.ok:
                 continue
             out_path = dest_dir / ctf_file.name

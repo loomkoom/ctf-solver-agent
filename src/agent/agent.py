@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -15,12 +16,274 @@ from src.llm_tiers import load_tiers, select_tier_index
 from src.state import DCipherState
 from src.tools.artifacts import extract_path_from_text, list_challenge_artifacts
 from src.tools.rag import search_knowledge
+from src.tools.inventory import resolve_tool_manual_key
 from src.tools.toolbox import ToolResult, Toolbox
 from src.trajectory import TrajectoryLogger
+from src.debug_log import debug_log, head_lines, preview_text, redact
 
 MAX_RAG_CHARS = 3500
 DEFAULT_FLAG_REGEX = r"\b[A-Za-z0-9_\-]{0,24}\{[^\n\r]{3,200}\}\b"
 CTF_PREFIX_FLAG_REGEX = r"(?:IGCTF|flag|CSCBE|UCTF|ctf)\{.*?\}"
+DEBUG_TOOL_PREVIEW_LINES = 8
+
+_TOOL_ALIASES = {
+    "cat": "read_file",
+    "type": "read_file",
+    "ls": "list_dir",
+    "dir": "list_dir",
+    "file": "file_info",
+}
+
+_PATH_PLACEHOLDER_MARKERS = (
+    "path/to",
+    "<path>",
+    "your/path",
+    "yourfile",
+    "your_file",
+    "file_here",
+    "path_here",
+)
+
+
+def _debug_context(state: DCipherState) -> dict:
+    return {
+        "run_id": state.get("run_id"),
+        "challenge_id": state.get("challenge_id"),
+        "challenge_name": state.get("challenge_name"),
+    }
+
+
+def _log_event(state: DCipherState, event: str, **fields) -> None:
+    debug_log(
+        settings.debug,
+        state.get("run_id"),
+        state.get("challenge_id"),
+        state.get("challenge_name"),
+        event,
+        **fields,
+    )
+
+
+def _llm_temperature(llm) -> float | int | str | None:
+    value = getattr(llm, "temperature", None)
+    if value is not None:
+        return value
+    model_kwargs = getattr(llm, "model_kwargs", None)
+    if isinstance(model_kwargs, dict) and "temperature" in model_kwargs:
+        return model_kwargs.get("temperature")
+    kwargs = getattr(llm, "kwargs", None)
+    if isinstance(kwargs, dict) and "temperature" in kwargs:
+        return kwargs.get("temperature")
+    return None
+
+
+def _summarize_messages(messages) -> dict:
+    roles: list[str] = []
+    lengths: list[int] = []
+    combined_parts: list[str] = []
+    total_chars = 0
+    for msg in messages:
+        role = getattr(msg, "type", msg.__class__.__name__)
+        content = getattr(msg, "content", "") or ""
+        roles.append(str(role))
+        lengths.append(len(content))
+        total_chars += len(content)
+        combined_parts.append(content)
+    combined = "\n".join(combined_parts)
+    return {
+        "msg_count": len(messages),
+        "msg_chars": total_chars,
+        "msg_lengths": lengths,
+        "msg_roles": roles,
+        "msg_preview": preview_text(redact(combined), 200),
+    }
+
+
+def _format_inventory_for_prompt(inventory: list[dict], limit: int = 8) -> str:
+    if not inventory:
+        return "none"
+    lines = []
+    for entry in inventory[:limit]:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path", "")
+        if not path:
+            continue
+        ftype = entry.get("type") or entry.get("mime") or ""
+        if ftype:
+            lines.append(f"- {path} ({ftype})")
+        else:
+            lines.append(f"- {path}")
+    if not lines:
+        return "none"
+    if len(inventory) > limit:
+        lines.append(f"...({len(inventory) - limit} more)")
+    return "\n".join(lines)
+
+
+def _extract_message_text(message) -> str:
+    if message is None:
+        return ""
+    content = getattr(message, "content", "") or ""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if "text" in block and block.get("text"):
+                    parts.append(str(block.get("text")))
+                elif "refusal" in block and block.get("refusal"):
+                    parts.append(str(block.get("refusal")))
+            else:
+                if hasattr(block, "text") and getattr(block, "text"):
+                    parts.append(str(getattr(block, "text")))
+                elif hasattr(block, "refusal") and getattr(block, "refusal"):
+                    parts.append(str(getattr(block, "refusal")))
+        text = "\n".join([part for part in parts if part])
+    else:
+        text = str(content) if content is not None else ""
+
+    if not text:
+        additional = getattr(message, "additional_kwargs", {}) or {}
+        refusal = additional.get("refusal")
+        if refusal:
+            return str(refusal)
+    return text
+
+
+def _summarize_llm_response(message) -> dict:
+    content = getattr(message, "content", None)
+    additional = getattr(message, "additional_kwargs", {}) or {}
+    metadata = getattr(message, "response_metadata", {}) or {}
+    summary = {
+        "content_type": type(content).__name__,
+        "content_preview": preview_text(redact(str(content)), 200) if content is not None else "",
+        "additional_keys": list(additional.keys()),
+        "response_metadata_keys": list(metadata.keys()),
+    }
+    if isinstance(content, list):
+        block_types: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                block_types.append(str(block.get("type") or "dict"))
+            else:
+                block_types.append(type(block).__name__)
+        summary["content_block_types"] = block_types[:8]
+        if len(block_types) > 8:
+            summary["content_block_types_truncated"] = len(block_types)
+    if "status" in metadata:
+        summary["response_status"] = metadata.get("status")
+    if "incomplete_details" in metadata:
+        summary["incomplete_details"] = metadata.get("incomplete_details")
+    if "id" in metadata:
+        summary["response_id"] = metadata.get("id")
+    return summary
+
+
+def _fallback_llm_response(role: str, state: DCipherState) -> AIMessage:
+    if role in {"planner", "executor"}:
+        return StubLLM(role).invoke([])
+    hint = _auto_failure_hint(state) or "No verifier response. Inspect stdout/stderr and retry."
+    return AIMessage(content=hint)
+
+
+def _invoke_llm(llm, messages, state: DCipherState, role: str, tier, purpose: str):
+    summary = _summarize_messages(messages)
+    max_tokens = tier.max_tokens if tier.max_tokens is not None else "unset"
+    num_predict = tier.max_tokens if tier.provider == "ollama" else "unset"
+    temperature = _llm_temperature(llm)
+    if temperature is None:
+        temperature = "unset"
+    _log_event(
+        state,
+        "llm_call_start",
+        role=role,
+        purpose=purpose,
+        provider=tier.provider,
+        model=tier.model,
+        max_tokens=max_tokens,
+        num_predict=num_predict,
+        temperature=temperature,
+        **summary,
+    )
+    _log_event(
+        state,
+        "llm_stream_start",
+        role=role,
+        purpose=purpose,
+        streaming=False,
+    )
+    start = time.monotonic()
+    try:
+        response = llm.invoke(messages)
+    except Exception as exc:
+        duration = time.monotonic() - start
+        _log_event(
+            state,
+            "llm_stream_end",
+            role=role,
+            purpose=purpose,
+            streaming=False,
+            duration_s=round(duration, 3),
+            status="error",
+        )
+        _log_event(
+            state,
+            "llm_call_error",
+            role=role,
+            purpose=purpose,
+            error=repr(exc),
+            retry=0,
+            duration_s=round(duration, 3),
+        )
+        raise
+    duration = time.monotonic() - start
+    response_text = _extract_message_text(response)
+    if not response_text.strip():
+        _log_event(
+            state,
+            "llm_empty_response",
+            role=role,
+            purpose=purpose,
+            provider=tier.provider,
+            model=tier.model,
+        )
+        _log_event(
+            state,
+            "llm_empty_response_detail",
+            role=role,
+            purpose=purpose,
+            **_summarize_llm_response(response),
+        )
+        response = _fallback_llm_response(role, state)
+        response_text = _extract_message_text(response)
+    try:
+        if response_text and response_text != getattr(response, "content", ""):
+            response = response.model_copy(update={"content": response_text})
+    except Exception:
+        if response_text:
+            response = AIMessage(content=response_text)
+    _log_event(
+        state,
+        "llm_stream_end",
+        role=role,
+        purpose=purpose,
+        streaming=False,
+        duration_s=round(duration, 3),
+        status="ok",
+    )
+    _log_event(
+        state,
+        "llm_call_end",
+        role=role,
+        purpose=purpose,
+        duration_s=round(duration, 3),
+        response_chars=len(response_text or ""),
+    )
+    return response
 
 
 def _init_llm(provider: str, model: str, role: str, max_tokens: int | None = None):
@@ -73,10 +336,16 @@ class StubLLM:
 def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryLogger | None = None):
     planner_tiers = load_tiers("planner")
     executor_tiers = load_tiers("executor")
+    verifier_tiers = load_tiers("verifier")
     llm_cache: dict[tuple[str, str, str, int | None], object] = {}
 
     def _get_llm(role: str, state: DCipherState):
-        tiers = planner_tiers if role == "planner" else executor_tiers
+        if role == "planner":
+            tiers = planner_tiers
+        elif role == "executor":
+            tiers = executor_tiers
+        else:
+            tiers = verifier_tiers
         idx = select_tier_index(state, tiers, role)
         tier = tiers[idx]
         key = (role, tier.provider, tier.model, tier.max_tokens)
@@ -90,318 +359,503 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
     web_tools = {"curl", "http_request", "ffuf"}
 
     def plan_node(state: DCipherState):
-        budget_reason = _budget_exceeded(state)
-        if budget_reason:
-            return _mark_done(state, f"Budget exceeded: {budget_reason}", trajectory_logger)
+        node_start = time.monotonic()
+        _log_event(state, "node_start", node="plan")
+        try:
+            budget_reason = _budget_exceeded(state)
+            if budget_reason:
+                return _mark_done(state, f"Budget exceeded: {budget_reason}", trajectory_logger)
 
-        retrieved_info = search_knowledge(state.get("challenge_context", ""))
-        retrieved_info = _truncate_text(retrieved_info, MAX_RAG_CHARS)
-        attempts = _summarize_attempts(state.get("attempt_history", [])[-3:])
-        research_summary = state.get("research_summary", "")
-
-        system_msg = SystemMessage(content=(
-            "You are the D-CIPHER Planner (Architect). "
-            "Pick at most 2 candidate categories and exactly one pipeline to try next. "
-            "Produce a concise plan and one next objective. "
-            "Use retrieved checklists/writeups when available. "
-            "If errors occurred, adapt the plan based on stderr. "
-            "Reply with:\nCATEGORIES:\nPIPELINE:\nPLAN:\n- ...\nOBJECTIVE:\n..."
-        ))
-        human_msg = HumanMessage(content=(
-            f"CHALLENGE:\n{state['challenge_context']}\n\n"
-            f"RESEARCH:\n{research_summary or 'none'}\n\n"
-            f"RAG:\n{retrieved_info}\n\n"
-            f"RECENT ATTEMPTS:\n{attempts}"
-        ))
-
-        planner_llm, tier, tier_idx = _get_llm("planner", state)
-        system_msg = SystemMessage(content=(
-            "You are the D-CIPHER Planner (Architect). "
-            "Pick at most 2 candidate categories and exactly one pipeline to try next. "
-            "Produce a concise plan and one next objective. "
-            "Use retrieved checklists/writeups when available. "
-            "If errors occurred, adapt the plan based on stderr. "
-            f"Keep the response under {tier.max_tokens or settings.planner_max_tokens} tokens. "
-            "Reply with:\nCATEGORIES:\nPIPELINE:\nPLAN:\n- ...\nOBJECTIVE:\n..."
-        ))
-        verifier_llm, tier, tier_idx = _get_llm("planner", state)
-        system_msg = SystemMessage(content=(
-            "You are the D-CIPHER Verifier. Analyze the last command output. "
-            "If it failed, explain why using stderr and propose the next fix. "
-            "Be concise and avoid assuming success without evidence. "
-            f"Keep the response under {tier.max_tokens or settings.planner_max_tokens} tokens."
-        ))
-        response = verifier_llm.invoke([system_msg, human_msg])
-        plan, objective, categories, pipeline = _parse_plan_objective(response.content)
-        categories = [c for c in categories if c] or [state.get("category", "unknown")]
-        categories = categories[:2]
-        selected_category = categories[0] if categories else state.get("category", "unknown")
-
-        category_pivots = state.get("category_pivots", 0)
-        prev_category = state.get("selected_category")
-        if prev_category and selected_category and prev_category != selected_category:
-            category_pivots += 1
-
-        phase_cycles = state.get("phase_cycles", 0) + 1
-        updates = {
-            "plan": plan,
-            "current_objective": objective,
-            "candidate_categories": categories,
-            "selected_category": selected_category,
-            "selected_pipeline": pipeline,
-            "phase_cycles": phase_cycles,
-            "category_pivots": category_pivots,
-            "messages": [response],
-            "reasoning_log": [f"Architect: {objective}"]
-        }
-        if trajectory_logger:
-            trajectory_logger.log(
-                "plan",
-                {
-                    "objective": objective,
-                    "categories": categories,
-                    "pipeline": pipeline,
-                    "phase_cycles": phase_cycles,
-                },
+            retrieved_info = search_knowledge(
+                state.get("challenge_context", ""),
+                debug_context=_debug_context(state),
             )
-        return updates
+            retrieved_info = _truncate_text(retrieved_info, MAX_RAG_CHARS)
+            attempts = _summarize_attempts(state.get("attempt_history", [])[-3:])
+            research_summary = state.get("research_summary", "")
+            inventory_hint = _format_inventory_for_prompt(state.get("artifact_inventory", []))
+
+            human_msg = HumanMessage(content=(
+                f"CHALLENGE:\n{state['challenge_context']}\n\n"
+                f"RESEARCH:\n{research_summary or 'none'}\n\n"
+                f"ARTIFACT INVENTORY:\n{inventory_hint}\n\n"
+                f"RAG:\n{retrieved_info}\n\n"
+                f"RECENT ATTEMPTS:\n{attempts}"
+            ))
+
+            planner_llm, tier, tier_idx = _get_llm("planner", state)
+            system_msg = SystemMessage(content=(
+                "You are the D-CIPHER Planner (Architect). "
+                "Pick at most 2 candidate categories and exactly one pipeline. "
+                "Always ground the plan in the triage summary and artifact inventory. "
+                "If triage is missing or empty, set PIPELINE to 'triage' and OBJECTIVE to run triage. "
+                "Otherwise: "
+                "If you see an archive, plan extract + list. "
+                "If text, plan read/strings/decoders. "
+                "If binary, plan file_info/strings/checksec. "
+                "If image/pdf, plan exiftool/binwalk/pdfinfo. "
+                "If URL provided, plan web tools only. "
+                "Do not invent files or paths; use the artifact inventory. "
+                "If errors occurred, adapt the plan based on stderr. "
+                f"Keep the response under {tier.max_tokens or settings.planner_max_tokens} tokens. "
+                "Reply with:\nCATEGORIES:\n- ...\nPIPELINE:\n- ...\nPLAN:\n- ...\nOBJECTIVE:\n- ..."
+            ))
+            response = _invoke_llm(planner_llm, [system_msg, human_msg], state, "planner", tier, "plan")
+            plan, objective, categories, pipeline = _parse_plan_objective(response.content)
+            categories = [c for c in categories if c] or [state.get("category", "unknown")]
+            categories = categories[:2]
+            selected_category = categories[0] if categories else state.get("category", "unknown")
+
+            category_pivots = state.get("category_pivots", 0)
+            prev_category = state.get("selected_category")
+            if prev_category and selected_category and prev_category != selected_category:
+                category_pivots += 1
+
+            phase_cycles = state.get("phase_cycles", 0) + 1
+            updates = {
+                "plan": plan,
+                "current_objective": objective,
+                "candidate_categories": categories,
+                "selected_category": selected_category,
+                "selected_pipeline": pipeline,
+                "phase_cycles": phase_cycles,
+                "category_pivots": category_pivots,
+                "messages": [response],
+                "reasoning_log": [f"Architect: {objective}"]
+            }
+            if trajectory_logger:
+                trajectory_logger.log(
+                    "plan",
+                    {
+                        "objective": objective,
+                        "categories": categories,
+                        "pipeline": pipeline,
+                        "phase_cycles": phase_cycles,
+                    },
+                )
+            return updates
+        except Exception as exc:
+            _log_event(state, "node_error", node="plan", error=repr(exc))
+            raise
+        finally:
+            _log_event(state, "node_end", node="plan", duration_s=round(time.monotonic() - node_start, 3))
 
     def research_node(state: DCipherState):
-        if state.get("done"):
-            return {}
-        budget_reason = _budget_exceeded(state)
-        if budget_reason:
-            return _mark_done(state, f"Budget exceeded: {budget_reason}", trajectory_logger)
+        node_start = time.monotonic()
+        _log_event(state, "node_start", node="research")
+        try:
+            if state.get("done"):
+                return {}
+            budget_reason = _budget_exceeded(state)
+            if budget_reason:
+                return _mark_done(state, f"Budget exceeded: {budget_reason}", trajectory_logger)
+            if state.get("triage_done") and state.get("research_summary"):
+                return {}
 
-        container_dir = state.get("container_dir") or _infer_container_dir(state.get("challenge_context", ""))
-        files = state.get("current_files", []) or []
-        if not container_dir or not files:
-            summary = "No files provided." if not files else "No container directory found."
+            container_dir = state.get("container_dir") or _infer_container_dir(state.get("challenge_context", ""))
+            files = state.get("current_files", []) or []
+            if not container_dir or not files:
+                summary = "No files provided." if not files else "No container directory found."
+                if trajectory_logger:
+                    trajectory_logger.log("research", {"summary": summary})
+                return {
+                    "research_summary": summary,
+                    "artifact_inventory": [],
+                    "triage_done": True,
+                    "reasoning_log": [f"Research: {summary}"],
+                }
+
+            cmd = _build_research_command(container_dir)
+            tool_args = {"command": cmd}
+            tool_start = time.monotonic()
+            _log_event(
+                state,
+                "tool_start",
+                tool="bash",
+                phase="research",
+                args=redact(tool_args),
+            )
+            tool_result = toolbox.run(cmd)
+            tool_duration = time.monotonic() - tool_start
+            _log_event(
+                state,
+                "tool_end",
+                tool=tool_result.tool,
+                phase="research",
+                duration_s=round(tool_duration, 3),
+                exit_code=tool_result.exit_code,
+                stdout_head=redact(head_lines(tool_result.stdout, DEBUG_TOOL_PREVIEW_LINES)),
+                stderr_head=redact(head_lines(tool_result.stderr, DEBUG_TOOL_PREVIEW_LINES)),
+            )
+            log_path = _persist_tool_output(state, tool_result, phase="research")
+            tool_result.log_path = log_path
+            summary, inventory = _summarize_file_inventory(tool_result.stdout)
+
+            output_msg = HumanMessage(
+                content=_format_tool_output(tool_result, log_path)
+            )
+            updates = _record_attempt(state, tool_result, [output_msg], phase="research", log_path=log_path)
+            updates["research_summary"] = summary
+            updates["artifact_inventory"] = inventory
+            updates["triage_done"] = True
+            updates.setdefault("reasoning_log", []).append(f"Research: {summary}")
             if trajectory_logger:
-                trajectory_logger.log("research", {"summary": summary})
-            return {
-                "research_summary": summary,
-                "artifact_inventory": [],
-                "reasoning_log": [f"Research: {summary}"],
-            }
-
-        cmd = _build_research_command(container_dir)
-        tool_result = toolbox.run(cmd)
-        log_path = _persist_tool_output(state, tool_result, phase="research")
-        tool_result.log_path = log_path
-        summary, inventory = _summarize_file_inventory(tool_result.stdout)
-
-        output_msg = HumanMessage(
-            content=_format_tool_output(tool_result, log_path)
-        )
-        updates = _record_attempt(state, tool_result, [output_msg], phase="research", log_path=log_path)
-        updates["research_summary"] = summary
-        updates["artifact_inventory"] = inventory
-        updates.setdefault("reasoning_log", []).append(f"Research: {summary}")
-        if trajectory_logger:
-            trajectory_logger.log("research", {"summary": summary, "log_path": log_path})
-        return updates
+                trajectory_logger.log("research", {"summary": summary, "log_path": log_path})
+            return updates
+        except Exception as exc:
+            _log_event(state, "node_error", node="research", error=repr(exc))
+            raise
+        finally:
+            _log_event(state, "node_end", node="research", duration_s=round(time.monotonic() - node_start, 3))
 
     def execute_node(state: DCipherState):
-        if state.get("done"):
-            return {}
-        budget_reason = _budget_exceeded(state)
-        if budget_reason:
-            return _mark_done(state, f"Budget exceeded: {budget_reason}", trajectory_logger)
+        node_start = time.monotonic()
+        _log_event(state, "node_start", node="execute")
+        try:
+            if state.get("done"):
+                return {}
+            budget_reason = _budget_exceeded(state)
+            if budget_reason:
+                return _mark_done(state, f"Budget exceeded: {budget_reason}", trajectory_logger)
 
-        objective = state.get("current_objective") or "Initial reconnaissance"
-        url = state.get("url") or ""
-        research_summary = state.get("research_summary", "")
-        inventory = state.get("artifact_inventory", [])
+            objective = state.get("current_objective") or "Initial reconnaissance"
+            url = state.get("url") or ""
+            research_summary = state.get("research_summary", "")
+            inventory = state.get("artifact_inventory", [])
+            container_dir = state.get("container_dir", "")
 
-        if "check artifacts" in objective.lower():
-            path = extract_path_from_text(objective)
-            artifact_msg = list_challenge_artifacts(path)
-            tool_result = ToolResult(
-                tool="artifacts",
-                command=path or "",
-                stdout=artifact_msg,
-                stderr="",
-                exit_code=0
-            )
-            log_path = _persist_tool_output(state, tool_result, phase="execute")
-            tool_result.log_path = log_path
-            ai_msg = AIMessage(content=f"Artifacts lookup: {artifact_msg}")
-            return _record_attempt(state, tool_result, [ai_msg], phase="execute", log_path=log_path)
+            if "check artifacts" in objective.lower():
+                path = extract_path_from_text(objective)
+                tool_args = {"path": path or ""}
+                tool_start = time.monotonic()
+                _log_event(
+                    state,
+                    "tool_start",
+                    tool="artifacts",
+                    phase="execute",
+                    args=redact(tool_args),
+                )
+                artifact_msg = list_challenge_artifacts(path)
+                tool_result = ToolResult(
+                    tool="artifacts",
+                    command=path or "",
+                    stdout=artifact_msg,
+                    stderr="",
+                    exit_code=0
+                )
+                tool_duration = time.monotonic() - tool_start
+                _log_event(
+                    state,
+                    "tool_end",
+                    tool=tool_result.tool,
+                    phase="execute",
+                    duration_s=round(tool_duration, 3),
+                    exit_code=tool_result.exit_code,
+                    stdout_head=redact(head_lines(tool_result.stdout, DEBUG_TOOL_PREVIEW_LINES)),
+                    stderr_head=redact(head_lines(tool_result.stderr, DEBUG_TOOL_PREVIEW_LINES)),
+                )
+                log_path = _persist_tool_output(state, tool_result, phase="execute")
+                tool_result.log_path = log_path
+                ai_msg = AIMessage(content=f"Artifacts lookup: {artifact_msg}")
+                return _record_attempt(state, tool_result, [ai_msg], phase="execute", log_path=log_path)
 
-        executor_llm, tier, tier_idx = _get_llm("executor", state)
-        system_msg = SystemMessage(content=(
-            "You are the D-CIPHER Executor. Pick exactly one tool call. "
-            "Respond with JSON: {\"tool\": \"name\", \"args\": {..}} "
-            "Use tool \"bash\" for raw shell commands. "
-            "Only use web tools if an explicit URL is provided. "
-            f"Keep the response under {tier.max_tokens or settings.executor_max_tokens} tokens. "
-            f"Tools: {', '.join(tool_registry.keys())}"
-        ))
-        human_msg = HumanMessage(content=(
-            f"OBJECTIVE:\n{objective}\n\n"
-            f"URL:\n{url or 'none'}\n\n"
-            f"RESEARCH SUMMARY:\n{research_summary or 'none'}\n\n"
-            f"ARTIFACT INVENTORY:\n{inventory or 'none'}"
-        ))
+            executor_llm, tier, tier_idx = _get_llm("executor", state)
+            system_msg = SystemMessage(content=(
+                "You are the D-CIPHER Executor (Operator). Pick exactly one tool call. "
+                "Respond with raw JSON only: {\"tool\": \"name\", \"args\": {..}} "
+                "Do not wrap the JSON in code fences or add commentary. "
+                "Prefer toolbox tools (read_file, list_dir, extract_archive, file_info, strings, base_decode) over bash. "
+                "Use tool \"bash\" only for short, concrete shell commands or small pipelines. "
+                "Only use web tools if an explicit URL is provided. "
+                "Use real paths from the ARTIFACT INVENTORY; never use placeholders like /path/to/file. "
+                "If the objective is to inspect an archive, use extract_archive with the archive path. "
+                "Tool manuals exist in the local KB; use them to choose correct flags/args. "
+                f"Keep the response under {tier.max_tokens or settings.executor_max_tokens} tokens. "
+                f"Tools: {', '.join(tool_registry.keys())}"
+            ))
+            human_msg = HumanMessage(content=(
+                f"OBJECTIVE:\n{objective}\n\n"
+                f"URL:\n{url or 'none'}\n\n"
+                f"CONTAINER_DIR:\n{container_dir or 'unknown'}\n\n"
+                f"RESEARCH SUMMARY:\n{research_summary or 'none'}\n\n"
+                f"ARTIFACT INVENTORY:\n{_format_inventory_for_prompt(inventory)}"
+            ))
 
-        response = executor_llm.invoke([system_msg, human_msg])
-        tool_name, args, raw_cmd = _parse_tool_call(response.content)
+            response = _invoke_llm(executor_llm, [system_msg, human_msg], state, "executor", tier, "execute_select")
+            tool_name, args, raw_cmd = _parse_tool_call(response.content)
+            tool_name = _normalize_tool_name(tool_name)
+            executor_messages = [response]
 
-        if tool_name == "bash" and "command" not in args:
-            fallback_cmd = raw_cmd or response.content.strip()
-            args = {"command": fallback_cmd}
+            if tool_name == "bash" and "command" not in args:
+                if "commands" in args:
+                    args = {"command": _join_commands(args.get("commands"))}
+                else:
+                    fallback_cmd = raw_cmd or response.content.strip()
+                    args = {"command": fallback_cmd}
 
-        args = _normalize_tool_args(tool_name, args)
+            args = _normalize_tool_args(tool_name, args)
+            args = _resolve_artifact_paths(args, inventory)
+            manual_key = _resolve_tool_manual_key_for_call(tool_name, args)
+            manual_text = ""
+            manual_seen = list(state.get("tool_manuals_seen", []))
+            if manual_key and manual_key not in manual_seen:
+                manual_text = search_knowledge(
+                    f"TOOL MANUAL: {manual_key}",
+                    debug_context=_debug_context(state),
+                )
+                manual_text = _truncate_text(manual_text, MAX_RAG_CHARS)
+                manual_seen.append(manual_key)
 
-        if tool_name in web_tools and not url:
-            tool_result = ToolResult(
-                tool=tool_name,
-                command=json.dumps(args),
-                stdout="",
-                stderr="Web tools require an explicit URL in the challenge context.",
-                exit_code=2,
-            )
-        elif tool_name in web_tools and url and _violates_url_scope(json.dumps(args), url):
-            tool_result = ToolResult(
-                tool=tool_name,
-                command=json.dumps(args),
-                stdout="",
-                stderr="Tool targets a URL outside the provided endpoint scope.",
-                exit_code=2,
-            )
-        elif tool_name == "bash" and not url and _contains_network_command(args.get("command", "")):
-            tool_result = ToolResult(
-                tool="bash",
-                command=args.get("command", ""),
-                stdout="",
-                stderr="Network access requires an explicit URL in the challenge context.",
-                exit_code=2,
-            )
-        elif tool_name == "bash" and url and _violates_url_scope(args.get("command", ""), url):
-            tool_result = ToolResult(
-                tool="bash",
-                command=args.get("command", ""),
-                stdout="",
-                stderr="Command targets a URL outside the provided endpoint scope.",
-                exit_code=2,
-            )
-        elif tool_name == "bash" and _is_disallowed_command(args.get("command", "")):
-            tool_result = ToolResult(
-                tool="bash",
-                command=args.get("command", ""),
-                stdout="",
-                stderr="Disallowed command (port scanning or prohibited tooling).",
-                exit_code=2,
-            )
-        elif tool_name in tool_registry:
+            if manual_text and tool_name != "bash":
+                refine_system_msg = SystemMessage(content=(
+                    f"You already chose tool '{tool_name}'. Use the manual below to refine args. "
+                    "Respond with JSON: {\"tool\": \"name\", \"args\": {..}} and keep the same tool."
+                ))
+                refine_human_msg = HumanMessage(content=(
+                    f"OBJECTIVE:\n{objective}\n\n"
+                    f"CURRENT ARGS:\n{json.dumps(args)}\n\n"
+                    f"TOOL MANUAL:\n{manual_text}\n"
+                ))
+                refine_response = _invoke_llm(
+                    executor_llm,
+                    [refine_system_msg, refine_human_msg],
+                    state,
+                    "executor",
+                    tier,
+                    "execute_refine",
+                )
+                executor_messages.append(refine_response)
+                refined_tool, refined_args, refined_cmd = _parse_tool_call(refine_response.content)
+                if refined_tool and refined_tool != tool_name:
+                    refined_tool = tool_name
+                if refined_args:
+                    tool_name = refined_tool or tool_name
+                    args = _normalize_tool_args(tool_name, refined_args)
+                    args = _resolve_artifact_paths(args, inventory)
+                    raw_cmd = refined_cmd
+
             missing = _missing_required_args(tool_name, args)
             if missing:
+                inventory_hint = _format_inventory_for_prompt(inventory)
+                repair_system_msg = SystemMessage(content=(
+                    f"You selected tool '{tool_name}' but required args are missing: {', '.join(missing)}. "
+                    "Provide corrected JSON: {\"tool\": \"name\", \"args\": {..}}. "
+                    "Keep the same tool unless it cannot satisfy the objective. "
+                    "Use real paths from ARTIFACT INVENTORY; avoid placeholders like path/to/file."
+                ))
+                repair_human_msg = HumanMessage(content=(
+                    f"OBJECTIVE:\n{objective}\n\n"
+                    f"URL:\n{url or 'none'}\n\n"
+                    f"CURRENT ARGS:\n{json.dumps(args)}\n\n"
+                    f"MISSING:\n{', '.join(missing)}\n"
+                    f"ARTIFACT INVENTORY:\n{inventory_hint}\n"
+                ))
+                repair_response = _invoke_llm(
+                    executor_llm,
+                    [repair_system_msg, repair_human_msg],
+                    state,
+                    "executor",
+                    tier,
+                    "execute_repair",
+                )
+                executor_messages.append(repair_response)
+                repaired_tool, repaired_args, repaired_cmd = _parse_tool_call(repair_response.content)
+                if repaired_tool:
+                    tool_name = repaired_tool
+                if repaired_args:
+                    args = _normalize_tool_args(tool_name, repaired_args)
+                    args = _resolve_artifact_paths(args, inventory)
+                if repaired_cmd:
+                    raw_cmd = repaired_cmd
+
+            tool_start = time.monotonic()
+            _log_event(
+                state,
+                "tool_start",
+                tool=tool_name or "unknown",
+                phase="execute",
+                args=redact(args),
+            )
+            if tool_name in web_tools and not url:
                 tool_result = ToolResult(
                     tool=tool_name,
                     command=json.dumps(args),
                     stdout="",
-                    stderr=f"Missing required args for {tool_name}: {', '.join(missing)}",
+                    stderr="Web tools require an explicit URL in the challenge context.",
                     exit_code=2,
                 )
-            else:
-                try:
-                    tool_result = tool_registry[tool_name](**args)
-                except TypeError as exc:
+            elif tool_name in web_tools and url and _violates_url_scope(json.dumps(args), url):
+                tool_result = ToolResult(
+                    tool=tool_name,
+                    command=json.dumps(args),
+                    stdout="",
+                    stderr="Tool targets a URL outside the provided endpoint scope.",
+                    exit_code=2,
+                )
+            elif tool_name == "bash" and not url and _contains_network_command(args.get("command", "")):
+                tool_result = ToolResult(
+                    tool="bash",
+                    command=args.get("command", ""),
+                    stdout="",
+                    stderr="Network access requires an explicit URL in the challenge context.",
+                    exit_code=2,
+                )
+            elif tool_name == "bash" and url and _violates_url_scope(args.get("command", ""), url):
+                tool_result = ToolResult(
+                    tool="bash",
+                    command=args.get("command", ""),
+                    stdout="",
+                    stderr="Command targets a URL outside the provided endpoint scope.",
+                    exit_code=2,
+                )
+            elif tool_name == "bash" and _is_disallowed_command(args.get("command", "")):
+                tool_result = ToolResult(
+                    tool="bash",
+                    command=args.get("command", ""),
+                    stdout="",
+                    stderr="Disallowed command (port scanning or prohibited tooling).",
+                    exit_code=2,
+                )
+            elif tool_name in tool_registry:
+                missing = _missing_required_args(tool_name, args)
+                if missing:
                     tool_result = ToolResult(
                         tool=tool_name,
                         command=json.dumps(args),
                         stdout="",
-                        stderr=f"Tool argument error: {exc}",
+                        stderr=(
+                            f"Missing required args for {tool_name}: {', '.join(missing)}\n"
+                            f"Provided args: {json.dumps(args)}"
+                        ),
                         exit_code=2,
                     )
-        else:
-            tool_result = ToolResult(
-                tool=tool_name or "unknown",
-                command=raw_cmd,
-                stdout="",
-                stderr="Unknown tool requested.",
-                exit_code=127,
-            )
+                else:
+                    try:
+                        tool_result = tool_registry[tool_name](**args)
+                    except TypeError as exc:
+                        tool_result = ToolResult(
+                            tool=tool_name,
+                            command=json.dumps(args),
+                            stdout="",
+                            stderr=f"Tool argument error: {exc}",
+                            exit_code=2,
+                        )
+            else:
+                tool_result = ToolResult(
+                    tool=tool_name or "unknown",
+                    command=raw_cmd,
+                    stdout="",
+                    stderr="Unknown tool requested.",
+                    exit_code=127,
+                )
 
-        log_path = _persist_tool_output(state, tool_result, phase="execute")
-        tool_result.log_path = log_path
-        output_msg = HumanMessage(content=_format_tool_output(tool_result, log_path))
-        updates = _record_attempt(state, tool_result, [response, output_msg], phase="execute", log_path=log_path)
-        if trajectory_logger:
-            trajectory_logger.log("execute", {"tool": tool_result.tool, "command": tool_result.command, "log_path": log_path})
-        return updates
+            tool_duration = time.monotonic() - tool_start
+            _log_event(
+                state,
+                "tool_end",
+                tool=tool_result.tool,
+                phase="execute",
+                duration_s=round(tool_duration, 3),
+                exit_code=tool_result.exit_code,
+                stdout_head=redact(head_lines(tool_result.stdout, DEBUG_TOOL_PREVIEW_LINES)),
+                stderr_head=redact(head_lines(tool_result.stderr, DEBUG_TOOL_PREVIEW_LINES)),
+            )
+            log_path = _persist_tool_output(state, tool_result, phase="execute")
+            tool_result.log_path = log_path
+            output_msg = HumanMessage(content=_format_tool_output(tool_result, log_path))
+            updates = _record_attempt(state, tool_result, executor_messages + [output_msg], phase="execute", log_path=log_path)
+            if manual_seen != state.get("tool_manuals_seen", []):
+                updates["tool_manuals_seen"] = manual_seen
+            if trajectory_logger:
+                trajectory_logger.log("execute", {"tool": tool_result.tool, "command": tool_result.command, "log_path": log_path})
+            return updates
+        except Exception as exc:
+            _log_event(state, "node_error", node="execute", error=repr(exc))
+            raise
+        finally:
+            _log_event(state, "node_end", node="execute", duration_s=round(time.monotonic() - node_start, 3))
 
     def verify_node(state: DCipherState):
-        if state.get("done"):
-            return {}
-        output = state.get("last_output", "")
-        error = state.get("last_error", "")
-        evidence_hits = _extract_flags_with_evidence(
-            output,
-            error,
-            state.get("flag_format", settings.flag_format),
-            state.get("last_log_path", ""),
-        )
-        flags = [hit["flag"] for hit in evidence_hits]
-        merged_flags = _merge_flags(state.get("flag_candidates", []), flags)
-        new_hits = _new_flag_hits(state.get("flag_hits", []), evidence_hits, state)
+        node_start = time.monotonic()
+        _log_event(state, "node_start", node="verify")
+        try:
+            if state.get("done"):
+                return {}
+            output = state.get("last_output", "")
+            error = state.get("last_error", "")
+            evidence_hits = _extract_flags_with_evidence(
+                output,
+                error,
+                state.get("flag_format", settings.flag_format),
+                state.get("last_log_path", ""),
+            )
+            flags = [hit["flag"] for hit in evidence_hits]
+            merged_flags = _merge_flags(state.get("flag_candidates", []), flags)
+            new_hits = _new_flag_hits(state.get("flag_hits", []), evidence_hits, state)
 
-        observation = _summarize_observation(state)
-        updates = {
-            "flag_candidates": merged_flags,
-            "flag_hits": new_hits,
-            "reasoning_log": [observation]
-        }
+            observation = _summarize_observation(state)
+            updates = {
+                "flag_candidates": merged_flags,
+                "flag_hits": new_hits,
+                "reasoning_log": [observation]
+            }
 
-        if connector:
-            all_hits = list(state.get("flag_hits", [])) + new_hits
-            hit_flags = {hit["flag"] for hit in all_hits}
-            new_flags = [
-                flag for flag in merged_flags
-                if flag not in state.get("submitted_flags", []) and flag in hit_flags
-            ]
-            for flag in new_flags:
-                if not _is_flag_like(flag, state.get("flag_format", settings.flag_format)):
-                    continue
-                resp = connector.submit_flag(int(state["challenge_id"]), flag)
-                status = _submission_status(resp)
-                updates.setdefault("submitted_flags", state.get("submitted_flags", []) + [flag])
-                updates.setdefault("reasoning_log", []).append(
-                    f"Submission {flag}: {status}"
-                )
-                if status == "correct":
-                    updates["done"] = True
-                    if trajectory_logger:
-                        trajectory_logger.log("verify", {"status": status, "flag": flag})
-                    return updates
+            if connector:
+                all_hits = list(state.get("flag_hits", [])) + new_hits
+                hit_flags = {hit["flag"] for hit in all_hits}
+                new_flags = [
+                    flag for flag in merged_flags
+                    if flag not in state.get("submitted_flags", []) and flag in hit_flags
+                ]
+                for flag in new_flags:
+                    if not _is_flag_like(flag, state.get("flag_format", settings.flag_format)):
+                        continue
+                    resp = connector.submit_flag(int(state["challenge_id"]), flag)
+                    status = _submission_status(resp)
+                    updates.setdefault("submitted_flags", state.get("submitted_flags", []) + [flag])
+                    updates.setdefault("reasoning_log", []).append(
+                        f"Submission {flag}: {status}"
+                    )
+                    if status == "correct":
+                        updates["done"] = True
+                        if trajectory_logger:
+                            trajectory_logger.log("verify", {"status": status, "flag": flag})
+                        return updates
 
-        verifier_llm, tier, tier_idx = _get_llm("planner", state)
-        system_msg = SystemMessage(content=(
-            "You are the D-CIPHER Verifier. Analyze the last command output. "
-            "If it failed, explain why using stderr and propose the next fix. "
-            "Be concise and avoid assuming success without evidence. "
-            f"Keep the response under {tier.max_tokens or settings.planner_max_tokens} tokens."
-        ))
-        stdout = _truncate_text(state.get("last_output", ""), settings.output_large_char_threshold)
-        stderr = _truncate_text(state.get("last_error", ""), settings.output_large_char_threshold)
-        auto_hint = _auto_failure_hint(state)
-        human_msg = HumanMessage(content=(
-            f"OBJECTIVE: {state.get('current_objective')}\n"
-            f"LAST COMMAND: {state.get('last_command')}\n"
-            f"EXIT CODE: {state.get('last_exit_code')}\n"
-            f"STDOUT:\n{stdout}\n"
-            f"STDERR:\n{stderr}\n"
-            f"AUTO_HINT: {auto_hint or 'none'}\n"
-            f"FLAGS: {state.get('flag_candidates')}\n"
-        ))
+            verifier_llm, tier, tier_idx = _get_llm("verifier", state)
+            system_msg = SystemMessage(content=(
+                "You are the D-CIPHER Verifier (Critic). Analyze the last command output. "
+                "If it failed, state the exact cause from stderr/exit code and propose ONE concrete next action. "
+                "If it succeeded but no flag is found, propose the smallest next step grounded in triage (decode, extract, strings, etc.). "
+                "Use real paths from the artifact inventory; do not use placeholders. "
+                "Be concise and avoid assuming success without evidence. "
+                f"Keep the response under {tier.max_tokens or settings.verifier_max_tokens} tokens."
+            ))
+            stdout = _truncate_text(state.get("last_output", ""), settings.output_large_char_threshold)
+            stderr = _truncate_text(state.get("last_error", ""), settings.output_large_char_threshold)
+            auto_hint = _auto_failure_hint(state)
+            human_msg = HumanMessage(content=(
+                f"OBJECTIVE: {state.get('current_objective')}\n"
+                f"LAST COMMAND: {state.get('last_command')}\n"
+                f"EXIT CODE: {state.get('last_exit_code')}\n"
+                f"STDOUT:\n{stdout}\n"
+                f"STDERR:\n{stderr}\n"
+                f"AUTO_HINT: {auto_hint or 'none'}\n"
+                f"FLAGS: {state.get('flag_candidates')}\n"
+                f"ARTIFACT INVENTORY: {_format_inventory_for_prompt(state.get('artifact_inventory', []))}\n"
+            ))
 
-        response = verifier_llm.invoke([system_msg, human_msg])
-        updates.setdefault("messages", []).append(response)
-        updates.setdefault("reasoning_log", []).append(f"Verifier: {response.content[:200]}")
-        if trajectory_logger:
-            trajectory_logger.log("verify", {"reflection": response.content[:200]})
-        return updates
+            response = _invoke_llm(verifier_llm, [system_msg, human_msg], state, "verifier", tier, "verify")
+            updates.setdefault("messages", []).append(response)
+            updates.setdefault("reasoning_log", []).append(f"Verifier: {response.content[:200]}")
+            if trajectory_logger:
+                trajectory_logger.log("verify", {"reflection": response.content[:200]})
+            return updates
+        except Exception as exc:
+            _log_event(state, "node_error", node="verify", error=repr(exc))
+            raise
+        finally:
+            _log_event(state, "node_end", node="verify", duration_s=round(time.monotonic() - node_start, 3))
 
     def should_continue(state: DCipherState) -> Literal["plan", END]:
         if state.get("done"):
@@ -442,14 +896,35 @@ def _tool_registry(toolbox: Toolbox) -> dict:
         "checksec": toolbox.checksec,
         "strings": toolbox.strings,
         "exiftool": toolbox.exiftool,
+        "foremost": toolbox.foremost,
+        "tshark": toolbox.tshark,
+        "yara": toolbox.yara,
+        "pdfinfo": toolbox.pdfinfo,
+        "pdftotext": toolbox.pdftotext,
+        "qpdf": toolbox.qpdf,
+        "pdf_parser": toolbox.pdf_parser,
         "stegseek": toolbox.stegseek,
         "zsteg": toolbox.zsteg,
+        "zbarimg": toolbox.zbarimg,
+        "qrencode": toolbox.qrencode,
+        "apktool": toolbox.apktool,
+        "jadx": toolbox.jadx,
+        "aapt": toolbox.aapt,
+        "dex2jar": toolbox.dex2jar,
         "ciphey": toolbox.ciphey,
-        "lemmeknow": toolbox.lemmeknow,
+        "hashcat": toolbox.hashcat,
+        "john": toolbox.john,
+        "hashid": toolbox.hashid,
+        "name_that_hash": toolbox.name_that_hash,
+        "hashdeep": toolbox.hashdeep,
         "ghidra_headless": toolbox.ghidra_headless,
+        "ropgadget": toolbox.ropgadget,
+        "pwninit": toolbox.pwninit,
+        "one_gadget": toolbox.one_gadget,
         "radare2_json": toolbox.radare2_json,
         "objdump": toolbox.objdump,
         "readelf": toolbox.readelf,
+        "slither": toolbox.slither,
         "gdb_pwndbg": toolbox.gdb_pwndbg,
         "pwntools": toolbox.pwntools,
         "pwntools_template": toolbox.pwntools_template,
@@ -480,13 +955,34 @@ def _missing_required_args(tool_name: str, args: dict) -> list[str]:
         "checksec": ["path"],
         "strings": ["path"],
         "exiftool": ["path"],
+        "foremost": ["path"],
+        "tshark": ["path"],
+        "yara": ["rule_path", "target_path"],
+        "pdfinfo": ["path"],
+        "pdftotext": ["path"],
+        "qpdf": ["path"],
+        "pdf_parser": ["path"],
         "stegseek": ["path"],
         "zsteg": ["path"],
+        "zbarimg": ["path"],
+        "qrencode": ["value"],
+        "apktool": ["path"],
+        "jadx": ["path"],
+        "aapt": ["path"],
+        "dex2jar": ["path"],
         "ciphey": ["text_or_path"],
         "ghidra_headless": ["project_dir", "project_name", "binary_path"],
+        "hashcat": ["hash_file"],
+        "john": ["hash_file"],
+        "hashid": ["value_or_path"],
+        "name_that_hash": ["value_or_path"],
+        "hashdeep": ["path"],
         "radare2_json": ["binary_path", "commands"],
         "objdump": ["binary_path"],
         "readelf": ["binary_path"],
+        "ropgadget": ["binary_path"],
+        "one_gadget": ["path"],
+        "slither": ["target"],
         "gdb_pwndbg": ["binary_path"],
         "pwntools": ["script"],
         "pwntools_template": ["binary_path"],
@@ -515,12 +1011,19 @@ def _normalize_tool_args(tool_name: str, args: dict) -> dict:
         args["template_name"] = args["name"]
 
     alias_map = {
-        "path": ["file", "filepath", "filename", "target", "input", "input_path"],
+        "path": ["file", "filepath", "file_path", "filename", "target", "input", "input_path"],
         "binary_path": ["binary", "bin", "exe", "elf", "program"],
         "command": ["cmd", "shell"],
         "pattern": ["regex", "query", "search"],
         "wordlist": ["wordlist_path", "wordlist_file", "wl"],
         "dest_dir": ["dest", "out", "output", "output_dir"],
+        "out_dir": ["dest_dir", "output_dir", "out_dir", "out", "output"],
+        "out_path": ["output_path", "out_path", "out_file", "output_file"],
+        "hash_file": ["hashes", "hash_path", "hashfile"],
+        "rule_path": ["rule", "rules", "yara_rule"],
+        "target_path": ["target_path", "target", "target_file", "path"],
+        "value_or_path": ["value", "text", "data", "hash", "path"],
+        "target": ["contract", "project", "path"],
         "project_dir": ["project", "project_path"],
         "project_name": ["proj_name"],
         "script": ["code", "python", "py"],
@@ -540,6 +1043,29 @@ def _normalize_tool_args(tool_name: str, args: dict) -> dict:
             if alias in args:
                 args[canonical] = args[alias]
                 break
+
+    if tool_name in {"hashcat", "john"} and "hash_file" not in args and "path" in args:
+        args["hash_file"] = args["path"]
+    if tool_name in {"hashid", "name_that_hash"} and "value_or_path" not in args:
+        for key in ("value", "path", "hash"):
+            if key in args:
+                args["value_or_path"] = args[key]
+                break
+    if tool_name == "yara":
+        if "rule_path" not in args and "rule" in args:
+            args["rule_path"] = args["rule"]
+        if "target_path" not in args and "path" in args:
+            args["target_path"] = args["path"]
+    if tool_name == "dex2jar" and "out_path" not in args and "out_dir" in args:
+        args["out_path"] = args["out_dir"]
+
+    if tool_name == "extract_archive":
+        path = args.get("path")
+        if path:
+            default_dest = f"{path}_extracted"
+            dest = args.get("dest_dir")
+            if not dest or dest in {"extracted", "extract", "output", "out"}:
+                args["dest_dir"] = default_dest
 
     if tool_name in {"bash_template", "python_template", "pwntools_template"}:
         return args
@@ -561,12 +1087,34 @@ def _normalize_tool_args(tool_name: str, args: dict) -> dict:
         "checksec": {"path"},
         "strings": {"path"},
         "exiftool": {"path"},
+        "foremost": {"path", "out_dir", "args"},
+        "tshark": {"path", "args"},
+        "yara": {"rule_path", "target_path", "args"},
+        "pdfinfo": {"path"},
+        "pdftotext": {"path", "out_path", "args"},
+        "qpdf": {"path", "out_path", "args"},
+        "pdf_parser": {"path", "args"},
         "stegseek": {"path", "wordlist"},
         "zsteg": {"path"},
+        "zbarimg": {"path", "args"},
+        "qrencode": {"value", "out_path", "args"},
+        "apktool": {"path", "out_dir", "args"},
+        "jadx": {"path", "out_dir", "args"},
+        "aapt": {"path", "args"},
+        "dex2jar": {"path", "out_path", "args"},
         "ghidra_headless": {"project_dir", "project_name", "binary_path"},
         "radare2_json": {"binary_path", "commands"},
         "objdump": {"binary_path", "args"},
         "readelf": {"binary_path", "args"},
+        "hashcat": {"hash_file", "wordlist", "args"},
+        "john": {"hash_file", "args"},
+        "hashid": {"value_or_path", "args"},
+        "name_that_hash": {"value_or_path", "args"},
+        "hashdeep": {"path", "args"},
+        "ropgadget": {"binary_path", "args"},
+        "pwninit": {"binary_path", "args"},
+        "one_gadget": {"path", "args"},
+        "slither": {"target", "args"},
         "gdb_pwndbg": {"binary_path", "gdb_commands"},
         "pwntools": {"script"},
         "pwntools_ret2win": {"binary_path", "offset", "win_symbol", "win_addr"},
@@ -582,10 +1130,102 @@ def _normalize_tool_args(tool_name: str, args: dict) -> dict:
     return _filter_args(args, allowed_keys.get(tool_name, set()))
 
 
+def _resolve_artifact_paths(args: dict, inventory: list[dict]) -> dict:
+    if not isinstance(args, dict) or not inventory:
+        return args
+
+    paths = [entry.get("path") for entry in inventory if isinstance(entry, dict) and entry.get("path")]
+    if not paths:
+        return args
+
+    name_to_paths: dict[str, list[str]] = {}
+    for path in paths:
+        name = Path(path).name
+        name_to_paths.setdefault(name, []).append(path)
+    name_map = {name: vals[0] for name, vals in name_to_paths.items() if len(vals) == 1}
+
+    def resolve_value(value):
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip().strip("\"'")
+        if not stripped:
+            return value
+        lowered = stripped.lower()
+        if any(marker in lowered for marker in _PATH_PLACEHOLDER_MARKERS):
+            base = Path(stripped).name
+            if base in name_map:
+                return name_map[base]
+            if len(name_map) == 1:
+                return next(iter(name_map.values()))
+            return stripped
+        if stripped.startswith("/"):
+            if stripped not in paths:
+                base = Path(stripped).name
+                if base in name_map:
+                    return name_map[base]
+            return stripped
+        base = Path(stripped).name
+        if base in name_map:
+            return name_map[base]
+        return stripped
+
+    path_keys = {
+        "path",
+        "binary_path",
+        "text_or_path",
+        "rule_path",
+        "target_path",
+        "hash_file",
+        "wordlist",
+        "value_or_path",
+        "project_dir",
+    }
+    for key in path_keys:
+        if key in args:
+            val = args[key]
+            if isinstance(val, list):
+                args[key] = [resolve_value(item) for item in val]
+            else:
+                args[key] = resolve_value(val)
+    return args
+
+
 def _filter_args(args: dict, allowed: set[str]) -> dict:
     if not allowed:
         return args
     return {key: value for key, value in args.items() if key in allowed}
+
+
+def _resolve_tool_manual_key_for_call(tool_name: str, args: dict) -> str | None:
+    manual_key = resolve_tool_manual_key(tool_name)
+    if manual_key:
+        return manual_key
+    if tool_name == "bash":
+        cmd = (args or {}).get("command", "")
+        head = _extract_first_command_token(cmd)
+        if head:
+            return resolve_tool_manual_key(head)
+    return None
+
+
+def _extract_first_command_token(command: str) -> str:
+    if not command:
+        return ""
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return ""
+    idx = 0
+    while idx < len(tokens):
+        token = tokens[idx]
+        if token in {"sudo", "env"}:
+            idx += 1
+            continue
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", token):
+            idx += 1
+            continue
+        return token
+    return ""
 
 
 def _budget_exceeded(state: DCipherState) -> str | None:
@@ -651,28 +1291,82 @@ def _build_research_command(container_dir: str) -> str:
     return (
         f"ls -la {escaped_dir} && "
         f"find {escaped_dir} -maxdepth 1 -type f -print0 | "
-        "xargs -0 -I{} sh -c 'echo \"=== {}\"; file -b \"{}\"'"
+        "xargs -0 -I{} sh -c '"
+        "path=\"{}\"; "
+        "echo \"=== $path\"; "
+        "echo TYPE: $(file -b \"$path\"); "
+        "echo MIME: $(file -bi \"$path\"); "
+        "size=$(stat -c %s \"$path\" 2>/dev/null || wc -c < \"$path\"); "
+        "echo SIZE: $size; "
+        "echo STRINGS:; "
+        "strings -n 4 \"$path\" 2>/dev/null | head -n 20 | sed \"s/^/STR: /\""
+        "'"
     )
 
 
 def _summarize_file_inventory(stdout: str) -> tuple[str, list[dict]]:
     inventory: list[dict] = []
-    current_path = ""
+    current: dict | None = None
     for line in stdout.splitlines():
         if line.startswith("==="):
-            current_path = line.replace("===", "").strip()
+            if current:
+                inventory.append(current)
+            current = {
+                "path": line.replace("===", "").strip(),
+                "type": "",
+                "mime": "",
+                "encoding": "",
+                "size": "",
+                "strings_sample": [],
+            }
             continue
-        if current_path and line.strip():
-            inventory.append({"path": current_path, "type": line.strip()})
-            current_path = ""
+        if not current:
+            continue
+        if line.startswith("TYPE:"):
+            current["type"] = line.replace("TYPE:", "", 1).strip()
+            continue
+        if line.startswith("MIME:"):
+            mime = line.replace("MIME:", "", 1).strip()
+            current["mime"] = mime
+            match = re.search(r"charset=([^;\\s]+)", mime)
+            if match:
+                current["encoding"] = match.group(1)
+            continue
+        if line.startswith("SIZE:"):
+            current["size"] = line.replace("SIZE:", "", 1).strip()
+            continue
+        if line.startswith("STR:"):
+            sample = line.replace("STR:", "", 1).strip()
+            if len(sample) > 120:
+                sample = sample[:120] + "...(truncated)"
+            if len(current["strings_sample"]) < 3:
+                current["strings_sample"].append(sample)
+            continue
+    if current:
+        inventory.append(current)
     type_counts: dict[str, int] = {}
     for entry in inventory:
-        ftype = entry.get("type", "unknown")
+        ftype = entry.get("type") or entry.get("mime") or "unknown"
         type_counts[ftype] = type_counts.get(ftype, 0) + 1
     summary_parts = [f"{t} x{c}" for t, c in sorted(type_counts.items(), key=lambda kv: -kv[1])][:5]
     summary = "Files analyzed: " + str(len(inventory))
     if summary_parts:
         summary += f" ({', '.join(summary_parts)})"
+    if inventory:
+        detail_lines = []
+        for entry in inventory[:5]:
+            name = Path(entry.get("path", "")).name
+            parts = []
+            if entry.get("type"):
+                parts.append(entry["type"])
+            if entry.get("mime"):
+                parts.append(entry["mime"])
+            if entry.get("strings_sample"):
+                parts.append("strings: " + "; ".join(entry["strings_sample"]))
+            if parts:
+                detail_lines.append(f"{name}: " + " | ".join(parts))
+        if detail_lines:
+            summary += "\n" + "\n".join(detail_lines)
     return summary, inventory
 
 
@@ -696,22 +1390,62 @@ def _persist_tool_output(state: DCipherState, result: ToolResult, phase: str) ->
     log_path.write_text(payload, encoding="utf-8", errors="replace")
     return str(log_path)
 
+def _join_commands(value) -> str:
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return " && ".join(parts)
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _coerce_bash_args(args: dict, data: dict) -> tuple[dict, str]:
+    if "command" in args:
+        return args, str(args.get("command", "") or "")
+    if "commands" in args:
+        cmd = _join_commands(args.get("commands"))
+        if cmd:
+            return {"command": cmd}, cmd
+    for key in ("command", "cmd", "shell"):
+        if key in data and isinstance(data.get(key), str):
+            return {"command": data.get(key)}, str(data.get(key))
+    if "commands" in data:
+        cmd = _join_commands(data.get("commands"))
+        if cmd:
+            return {"command": cmd}, cmd
+    return args, str(data.get("command") or "")
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    if not tool_name:
+        return tool_name
+    stripped = tool_name.strip()
+    if stripped in _TOOL_ALIASES:
+        return _TOOL_ALIASES[stripped]
+    lowered = stripped.lower()
+    return _TOOL_ALIASES.get(lowered, stripped)
+
+
 def _parse_tool_call(text: str) -> tuple[str, dict, str]:
+    candidates: list[str] = []
     json_block = _extract_json_block(text)
     if json_block:
+        candidates.append(json_block)
+    fallback_block = _extract_first_json_object(text)
+    if fallback_block and fallback_block not in candidates:
+        candidates.append(fallback_block)
+
+    for candidate in candidates:
         try:
-            data = json.loads(json_block)
-            tool = data.get("tool", "").strip()
-            args = data.get("args") or {}
-            if tool == "bash":
-                if "command" in args:
-                    return tool, args, args.get("command", "")
-                if "command" in data:
-                    args = {"command": data["command"]}
-                    return tool, args, data.get("command", "")
-            return tool, args, data.get("command", "")
+            data = json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            continue
+        tool = str(data.get("tool", "") or "").strip()
+        args = data.get("args") or {}
+        if tool == "bash":
+            args, cmd = _coerce_bash_args(args, data)
+            return tool, args, cmd
+        return tool, args, str(data.get("command") or "")
 
     cmd = _extract_bash_command(text)
     if cmd:
@@ -720,15 +1454,49 @@ def _parse_tool_call(text: str) -> tuple[str, dict, str]:
 
 
 def _extract_json_block(text: str) -> str | None:
-    match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1)
-    match = re.search(r"(\{.*\})", text, re.DOTALL)
-    return match.group(1) if match else None
+    for pattern in (
+        r"```json\s*(\{.*?\})\s*```",
+        r"```\s*(\{.*?\})\s*```",
+    ):
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            return match.group(1)
+    return _extract_first_json_object(text)
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    if not text:
+        return None
+    start_idx = None
+    depth = 0
+    in_string = False
+    escape = False
+    for idx, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == "\"":
+                in_string = False
+            continue
+        if ch == "\"":
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start_idx = idx
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start_idx is not None:
+                    return text[start_idx:idx + 1]
+    return None
 
 
 def _extract_bash_command(text: str) -> str | None:
-    match = re.search(r"```bash\s*(.*?)\s*```", text, re.DOTALL)
+    match = re.search(r"```(?:bash|sh|shell)\s*(.*?)\s*```", text, re.DOTALL)
     return match.group(1).strip() if match else None
 
 

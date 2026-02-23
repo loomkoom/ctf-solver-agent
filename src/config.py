@@ -17,8 +17,8 @@ class Settings(BaseSettings):
 
     # --- Tiered Model Selection ---
     # Strategic thinking (The Architect)
-    planner_provider: str = "ollama"
-    planner_model: str = "qwen2.5-coder:14b-instruct"
+    planner_provider: str = "openai"
+    planner_model: str = "o3"
     planner_tiers: str = ""
     planner_max_tokens: int = 400
 
@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     executor_tiers: str = ""
     executor_max_tokens: int = 300
 
+    # Verification / critique
+    verifier_provider: str = "openai"
+    verifier_model: str = "o4-mini"
+    verifier_tiers: str = ""
+    verifier_max_tokens: int = 400
+
     # --- Tier routing thresholds (comma-separated) ---
     tier_phase_cycles: str = "3,6,10"
     tier_tool_calls: str = "5,8,12"
@@ -36,7 +42,7 @@ class Settings(BaseSettings):
     tier_failure_window: int = 3
 
     # Local exploitation (The Specialist - Ollama)
-    local_model: str = "qwen2.5-coder:7b"
+    local_model: str = "qwen2.5-coder:14b-instruct"
     ollama_base_url: str = "http://localhost:11434"
 
     # --- App Constants ---

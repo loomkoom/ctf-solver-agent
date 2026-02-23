@@ -14,12 +14,23 @@ class ModelTier:
 
 
 def load_tiers(role: str) -> list[ModelTier]:
-    if role not in {"planner", "executor"}:
+    if role not in {"planner", "executor", "verifier"}:
         raise ValueError(f"Unknown role: {role}")
-    raw = settings.planner_tiers if role == "planner" else settings.executor_tiers
-    default_provider = settings.planner_provider if role == "planner" else settings.executor_provider
-    default_model = settings.planner_model if role == "planner" else settings.executor_model
-    default_max = settings.planner_max_tokens if role == "planner" else settings.executor_max_tokens
+    if role == "planner":
+        raw = settings.planner_tiers
+        default_provider = settings.planner_provider
+        default_model = settings.planner_model
+        default_max = settings.planner_max_tokens
+    elif role == "executor":
+        raw = settings.executor_tiers
+        default_provider = settings.executor_provider
+        default_model = settings.executor_model
+        default_max = settings.executor_max_tokens
+    else:
+        raw = settings.verifier_tiers
+        default_provider = settings.verifier_provider
+        default_model = settings.verifier_model
+        default_max = settings.verifier_max_tokens
     tiers = _parse_tiers(raw, default_provider, default_model, default_max)
     return tiers
 

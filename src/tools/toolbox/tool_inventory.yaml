@@ -1,0 +1,526 @@
+tools:
+  - tool_name: core-utils
+    binaries:
+      - git
+      - jq
+      - rg
+    category: util
+    wrapper: bash_only
+    verify_cmd: "rg --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Use git/jq/rg for fast repo ops, JSON slicing, and text search.
+      Prefer rg over grep for speed; keep searches scoped.
+
+  - tool_name: file
+    binaries:
+      - file
+    aliases:
+      - file_info
+    category: util
+    wrapper: toolbox_method
+    verify_cmd: "file --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Identify file types quickly before deeper analysis.
+      Combine with strings/exiftool for richer context.
+
+  - tool_name: net-utils
+    binaries:
+      - curl
+      - wget
+      - dig
+      - host
+      - nslookup
+      - whois
+      - nc
+      - socat
+    category: util
+    wrapper: bash_only
+    verify_cmd: "curl --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Network tools must only target the explicit challenge endpoint.
+      Avoid scanning or broad probing; keep requests minimal.
+
+  - tool_name: archive-tools
+    binaries:
+      - 7z
+      - zip
+      - unzip
+      - xz
+    category: util
+    wrapper: bash_only
+    verify_cmd: "7z --help"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Use for archive listing and extraction to a dedicated folder.
+      Watch for nested archives and password prompts.
+
+  - tool_name: python3
+    binaries:
+      - python3
+      - pip3
+      - pipx
+    aliases:
+      - python
+      - pip
+    category: util
+    wrapper: bash_only
+    verify_cmd: "python3 --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Preferred for quick decode/parse scripts in the sandbox.
+      Avoid installing heavy deps during time-limited runs.
+
+  - tool_name: ruby
+    binaries:
+      - ruby
+      - gem
+    category: util
+    wrapper: bash_only
+    verify_cmd: "ruby --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Used by zsteg/one_gadget and other Ruby-based tooling.
+      Keep gem installs local to the sandbox only.
+
+  - tool_name: build-tools
+    binaries:
+      - gcc
+      - g++
+      - make
+    category: util
+    wrapper: bash_only
+    verify_cmd: "gcc --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Compile helper binaries or PoCs inside the sandbox only.
+      Beware PIE/default hardening flags when compiling exploits.
+
+  - tool_name: ffuf
+    binaries:
+      - ffuf
+      - feroxbuster
+      - whatweb
+    category: web
+    wrapper: toolbox_method
+    verify_cmd: "ffuf -h"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Web enumeration tools: use only against provided URL scopes.
+      Cap request counts and avoid recursive scans unless required.
+
+  - tool_name: zaproxy
+    binaries:
+      - zaproxy
+      - zap.sh
+    category: web
+    wrapper: not_supported
+    verify_cmd: "zaproxy -h"
+    default_timeout_s: 30
+    allowed: false
+    notes: |
+      GUI-heavy DAST tool; not suitable for automated sandbox runs.
+      Prefer lightweight web probes and explicit endpoints only.
+
+  - tool_name: sqlmap
+    binaries:
+      - sqlmap
+    category: web
+    wrapper: not_supported
+    verify_cmd: "sqlmap --version"
+    default_timeout_s: 30
+    allowed: false
+    notes: |
+      Automated SQLi scanner is disallowed in this environment.
+      Use manual, targeted testing when explicitly permitted.
+
+  - tool_name: android-tools
+    binaries:
+      - apktool
+      - jadx
+      - d2j-dex2jar
+      - adb
+      - aapt
+      - apksigner
+      - zipalign
+      - javac
+      - java
+      - jar
+    aliases:
+      - dex2jar
+    category: rev
+    wrapper: toolbox_method
+    verify_cmd: "apktool --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      APK triage/decompile utilities for mobile reversing tasks.
+      Keep outputs in separate folders to avoid collisions.
+
+  - tool_name: binwalk
+    binaries:
+      - binwalk
+    category: stego
+    wrapper: toolbox_method
+    verify_cmd: "binwalk --help"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Scan binary blobs for embedded files and signatures.
+      Use extraction sparingly; outputs can be large.
+
+  - tool_name: exiftool
+    binaries:
+      - exiftool
+    category: stego
+    wrapper: toolbox_method
+    verify_cmd: "exiftool -ver"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Extract metadata from images, audio, and documents.
+      Use -a/-u to reveal duplicate/unknown tags.
+
+  - tool_name: stego-suite
+    binaries:
+      - steghide
+      - stegseek
+      - stegsnow
+      - zsteg
+      - pngcheck
+    category: stego
+    wrapper: toolbox_method
+    verify_cmd: "stegseek --help"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Classic stego utilities for images and text containers.
+      Expect password-protected payloads; use wordlists carefully.
+
+  - tool_name: barcode-qr
+    binaries:
+      - zbarimg
+      - qrencode
+    aliases:
+      - zbarimg
+      - qrencode
+    category: stego
+    wrapper: toolbox_method
+    verify_cmd: "zbarimg --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Decode or generate QR/barcodes for quick payload extraction.
+      Preprocess blurry images with imagemagick if needed.
+
+  - tool_name: media-tools
+    binaries:
+      - convert
+      - identify
+      - ffmpeg
+      - sox
+    category: stego
+    wrapper: bash_only
+    verify_cmd: "ffmpeg -version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Inspect or transform media files for hidden channels.
+      Avoid lossy conversions until you preserve originals.
+
+  - tool_name: checksec
+    binaries:
+      - checksec
+    category: pwn
+    wrapper: toolbox_method
+    verify_cmd: "checksec --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Quickly inspect ELF binary protections (RELRO, PIE, NX).
+      Use alongside file/strings/objdump for context.
+
+  - tool_name: binutils
+    binaries:
+      - objdump
+      - readelf
+      - strings
+    category: rev
+    wrapper: toolbox_method
+    verify_cmd: "objdump --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Core binary inspection tools for ELF headers and disassembly.
+      Use -M intel for readable x86/x64 disassembly.
+
+  - tool_name: ghidra-headless
+    binaries:
+      - analyzeHeadless
+    aliases:
+      - ghidra_headless
+    category: rev
+    wrapper: toolbox_method
+    verify_cmd: "analyzeHeadless -help"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Headless Ghidra analysis for batch decompilation.
+      Requires a project dir and can be slow on large binaries.
+
+  - tool_name: radare2
+    binaries:
+      - r2
+    aliases:
+      - radare2_json
+    category: rev
+    wrapper: toolbox_method
+    verify_cmd: "r2 -v"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Reverse engineering framework; use -A or -c for analysis.
+      Prefer JSON output for machine parsing when possible.
+
+  - tool_name: rizin
+    binaries:
+      - rizin
+      - rz-bin
+      - rz-asm
+      - rz-ax
+    category: rev
+    wrapper: bash_only
+    verify_cmd: "rizin -v"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Radare2 fork with similar analysis tooling.
+      Use for alternative disassembly or when r2 results differ.
+
+  - tool_name: detect-it-easy
+    binaries:
+      - diec
+    category: rev
+    wrapper: bash_only
+    verify_cmd: "diec -h"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Detect packers/compilers to guide reversing strategy.
+      JSON output is easier to parse when available.
+
+  - tool_name: gdb
+    binaries:
+      - gdb
+    aliases:
+      - gdb_pwndbg
+    category: pwn
+    wrapper: toolbox_method
+    verify_cmd: "gdb --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Debugger with pwndbg/gef helpers for exploitation workflow.
+      Use batch mode only; avoid interactive sessions.
+
+  - tool_name: trace-tools
+    binaries:
+      - strace
+      - ltrace
+    category: rev
+    wrapper: bash_only
+    verify_cmd: "strace -V"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Trace syscalls and library calls for black-box behavior.
+      Expect noisy output; filter by syscall/library of interest.
+
+  - tool_name: patch-pack
+    binaries:
+      - patchelf
+      - upx
+      - nasm
+    category: pwn
+    wrapper: bash_only
+    verify_cmd: "patchelf --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Patch ELF interpreter/RPATH, unpack UPX, or assemble payloads.
+      Always keep a copy of the original binary.
+
+  - tool_name: pwntools
+    binaries: []
+    aliases:
+      - pwntools_template
+      - pwntools_ret2win
+      - pwntools_fmt_leak
+      - pwntools_rop_system
+    category: pwn
+    wrapper: toolbox_method
+    verify_cmd: "python3 -c \"import pwn\""
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Python exploit framework used via templates or custom scripts.
+      Set context.arch/endian explicitly to avoid mismatches.
+
+  - tool_name: pwn-helpers
+    binaries:
+      - ROPgadget
+      - pwninit
+      - one_gadget
+    aliases:
+      - ropgadget
+    category: pwn
+    wrapper: toolbox_method
+    verify_cmd: "ROPgadget --help"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Helper tools for gadget hunting and libc setup.
+      Ensure the correct libc/ld versions for accurate results.
+
+  - tool_name: crypto-toolkit
+    binaries:
+      - ciphey
+      - pywhat
+      - factordb
+      - RsaCtfTool
+      - rsatool
+    category: crypto
+    wrapper: toolbox_method
+    verify_cmd: "ciphey --help"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Automated crypto/encoding identification and RSA helpers.
+      Validate outputs manually; auto-decoders can mislead.
+
+  - tool_name: hash-cracking
+    binaries:
+      - hashcat
+      - john
+      - hashid
+      - nth
+      - hashdeep
+      - cap2hccapx
+    aliases:
+      - name_that_hash
+    category: crypto
+    wrapper: toolbox_method
+    verify_cmd: "hashcat --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Identify and crack hashes using wordlists or rules.
+      Always confirm hash mode and salt format before cracking.
+
+  - tool_name: sleuthkit
+    binaries:
+      - mmls
+      - fls
+      - icat
+      - tsk_recover
+    category: forensics
+    wrapper: bash_only
+    verify_cmd: "mmls -V"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      File system forensics for disk images and partitions.
+      Offsets are usually in sectors, not bytes.
+
+  - tool_name: foremost
+    binaries:
+      - foremost
+    category: forensics
+    wrapper: toolbox_method
+    verify_cmd: "foremost -V"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Carve files from raw images by signature.
+      Output can be large; restrict file types when possible.
+
+  - tool_name: tshark
+    binaries:
+      - tshark
+      - capinfos
+    category: forensics
+    wrapper: toolbox_method
+    verify_cmd: "tshark -v"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Command-line Wireshark for PCAP analysis.
+      Prefer display filters (-Y) for targeted extraction.
+
+  - tool_name: yara
+    binaries:
+      - yara
+    category: forensics
+    wrapper: toolbox_method
+    verify_cmd: "yara --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Pattern matching against files or memory dumps.
+      Use -r for recursion; keep rules minimal for speed.
+
+  - tool_name: pdf-tools
+    binaries:
+      - pdfinfo
+      - pdftotext
+      - pdfimages
+      - qpdf
+      - pdf-parser
+    aliases:
+      - pdf_parser
+    category: forensics
+    wrapper: toolbox_method
+    verify_cmd: "pdfinfo -v"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Inspect and extract content from PDFs and embedded objects.
+      Encrypted PDFs require qpdf decrypt before parsing.
+
+  - tool_name: slither
+    binaries:
+      - slither
+    category: rev
+    wrapper: toolbox_method
+    verify_cmd: "slither --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Solidity static analyzer for smart contract challenges.
+      Requires correct solc version for accurate parsing.
+
+  - tool_name: mobile-dynamic
+    binaries:
+      - frida
+      - frida-ps
+      - frida-ls-devices
+      - frida-trace
+      - objection
+    category: rev
+    wrapper: bash_only
+    verify_cmd: "frida --version"
+    default_timeout_s: 30
+    allowed: true
+    notes: |
+      Dynamic instrumentation tools; require emulator/device access.
+      Use only when an explicit mobile endpoint is provided.

@@ -37,6 +37,7 @@ class CTFState(TypedDict):
 
 class DCipherState(CTFState):
     messages: Annotated[list[BaseMessage], add]
+    run_id: str
     challenge_context: str
     flag_format: str
     current_objective: str
@@ -46,6 +47,7 @@ class DCipherState(CTFState):
     selected_pipeline: str
     research_summary: str
     artifact_inventory: list[dict]
+    triage_done: bool
     url: str
     container_dir: str
     last_command: str
@@ -63,3 +65,4 @@ class DCipherState(CTFState):
     category_pivots: int
     started_at: float
     run_dir: str
+    tool_manuals_seen: list[str]

@@ -12,6 +12,7 @@ from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
 
 from src.config import settings
+from src.debug_log import debug_log, preview_text
 
 def _rag_db_path() -> Path:
     return Path(settings.rag_db_path)
@@ -252,9 +253,46 @@ def _query_links_rag(query: str, n_results: int) -> list[dict[str, Any]]:
     return out
 
 
-def search_knowledge(query: str, n_results: int = 3, include_writeups: bool | None = None) -> str:
+def _log_rag(
+    debug_context: dict | None,
+    query: str,
+    n_results: int,
+    docs_count: int,
+    duration_s: float,
+    cache_status: str,
+    enabled: bool,
+) -> None:
+    if not debug_context or not settings.debug:
+        return
+    run_id = debug_context.get("run_id")
+    challenge_id = debug_context.get("challenge_id")
+    if not run_id or not challenge_id:
+        return
+    debug_log(
+        run_id=str(run_id),
+        challenge_id=str(challenge_id),
+        challenge_name=debug_context.get("challenge_name"),
+        event="rag_search",
+        query=preview_text(query, 200),
+        query_len=len(query or ""),
+        k=n_results,
+        cache=cache_status,
+        docs=docs_count,
+        duration_s=round(duration_s, 3),
+        enabled=settings.debug,
+    )
+
+
+def search_knowledge(
+    query: str,
+    n_results: int = 3,
+    include_writeups: bool | None = None,
+    debug_context: dict | None = None,
+) -> str:
     results: list[dict[str, Any]] = []
+    start = time.monotonic()
     if not settings.rag_enabled:
+        _log_rag(debug_context, query, n_results, 0, time.monotonic() - start, "miss", False)
         return ""
     use_writeups = settings.rag_include_writeups if include_writeups is None else include_writeups
     if use_writeups:
@@ -263,10 +301,12 @@ def search_knowledge(query: str, n_results: int = 3, include_writeups: bool | No
     results.extend(_query_links_rag(query, n_results))
 
     if not results:
+        _log_rag(debug_context, query, n_results, 0, time.monotonic() - start, "miss", True)
         return ""
 
     results.sort(key=lambda r: r.get("distance") if r.get("distance") is not None else 1e9)
     top = results[:n_results]
+    _log_rag(debug_context, query, n_results, len(top), time.monotonic() - start, "miss", True)
 
     formatted_results = []
     for item in top:

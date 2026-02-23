@@ -202,8 +202,8 @@ RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg \
     && bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
 
 # External binary downloads: pwninit
-RUN wget -q https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit \
-    && chmod +x /usr/local/bin/pwninit \
+RUN wget -q https://github.com/io12/pwninit/releases/download/3.3.1/pwninit -O /usr/local/bin/pwninit \
+    && chmod +x /usr/local/bin/pwninit
 
 WORKDIR /challenge
 CMD ["sleep", "infinity"]

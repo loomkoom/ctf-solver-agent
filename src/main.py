@@ -8,6 +8,7 @@ from pathlib import Path
 from src.challenges import LocalChallenge, load_challenge_dir
 from src.config import settings
 from src.ctfd import CTFdConnector
+from src.debug_log import debug_log
 from src.solver import run_solver
 from src.tools.rag import ingest_knowledge_base
 from src.tools.toolbox import Toolbox
@@ -46,6 +47,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--executor-model", default=settings.executor_model)
     parser.add_argument("--executor-tiers", default=settings.executor_tiers, help="Executor model tiers (JSON or CSV).")
     parser.add_argument("--executor-max-tokens", type=int, default=settings.executor_max_tokens)
+    parser.add_argument("--verifier-provider", default=settings.verifier_provider)
+    parser.add_argument("--verifier-model", default=settings.verifier_model)
+    parser.add_argument("--verifier-tiers", default=settings.verifier_tiers, help="Verifier model tiers (JSON or CSV).")
+    parser.add_argument("--verifier-max-tokens", type=int, default=settings.verifier_max_tokens)
     parser.add_argument("--tier-phase-cycles", default=settings.tier_phase_cycles, help="Tier thresholds for phase cycles (comma-separated).")
     parser.add_argument("--tier-tool-calls", default=settings.tier_tool_calls, help="Tier thresholds for tool calls (comma-separated).")
     parser.add_argument("--tier-category-pivots", default=settings.tier_category_pivots, help="Tier thresholds for category pivots (comma-separated).")
@@ -87,6 +92,10 @@ def main() -> None:
     settings.executor_model = args.executor_model
     settings.executor_tiers = args.executor_tiers
     settings.executor_max_tokens = args.executor_max_tokens
+    settings.verifier_provider = args.verifier_provider
+    settings.verifier_model = args.verifier_model
+    settings.verifier_tiers = args.verifier_tiers
+    settings.verifier_max_tokens = args.verifier_max_tokens
     settings.tier_phase_cycles = args.tier_phase_cycles
     settings.tier_tool_calls = args.tier_tool_calls
     settings.tier_category_pivots = args.tier_category_pivots
@@ -169,12 +178,23 @@ def _solve_ctfd_challenge(details: dict, connector: CTFdConnector, toolbox: Tool
     url = details.get("connection_info") or ""
 
     local_dir = Path("data/ctfd_cache") / str(challenge_id)
-    files = connector.download_challenge_files(challenge_id, local_dir)
     container_dir = f"{settings.sandbox_workdir}/ctfd/{challenge_id}"
+    debug_log(
+        settings.debug,
+        run_id,
+        str(challenge_id),
+        name,
+        "challenge_start",
+        source="ctfd",
+        path=str(local_dir),
+        container_dir=container_dir,
+    )
+    toolbox.run(f"mkdir -p {json.dumps(container_dir)}")
+    files = connector.download_challenge_files(challenge_id, local_dir)
     if files:
-        toolbox.run(f"mkdir -p {json.dumps(container_dir)}")
         for file in files:
             toolbox.copy_to_container(str(file), f"{container_dir}/{file.name}")
+    toolbox.set_workdir(container_dir)
 
     return run_solver(
         challenge_id=str(challenge_id),
@@ -194,13 +214,24 @@ def _solve_local_challenge(challenge: LocalChallenge, toolbox: Toolbox, run_id: 
     challenge_id = challenge.challenge_id
     container_dir = f"{settings.sandbox_workdir}/local/{run_id}/{challenge_id}"
     files: list[Path] = challenge.files
+    debug_log(
+        settings.debug,
+        run_id,
+        str(challenge_id),
+        challenge.name,
+        "challenge_start",
+        source="local",
+        path=str(challenge.root),
+        container_dir=container_dir,
+    )
+    toolbox.run(f"mkdir -p {json.dumps(container_dir)}")
     if files:
-        toolbox.run(f"mkdir -p {json.dumps(container_dir)}")
         for file in files:
             rel = file.relative_to(challenge.root)
             dest = f"{container_dir}/{rel.as_posix()}"
             toolbox.run(f"mkdir -p {json.dumps(Path(dest).parent.as_posix())}")
             toolbox.copy_to_container(str(file), dest)
+    toolbox.set_workdir(container_dir)
 
     return run_solver(
         challenge_id=challenge_id,
@@ -217,7 +248,7 @@ def _solve_local_challenge(challenge: LocalChallenge, toolbox: Toolbox, run_id: 
 
 
 def _preflight_llm() -> None:
-    for role in ("planner", "executor"):
+    for role in ("planner", "executor", "verifier"):
         tiers = load_tiers(role)
         for tier in tiers:
             provider = tier.provider
@@ -288,11 +319,16 @@ def _print_debug_info(result: dict, run_id: str) -> None:
         logs = sorted(log_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
         if logs:
             latest_log = str(logs[0])
-    print("DEBUG:")
-    print(f"  run_id: {run_id}")
-    print(f"  run_dir: {run_dir}")
-    print(f"  trajectory: {run_dir / 'trajectory.jsonl'}")
-    print(f"  latest_log: {latest_log or 'none'}")
+    debug_log(
+        settings.debug,
+        run_id,
+        str(challenge_id),
+        result.get("challenge_name"),
+        "debug_info",
+        run_dir=str(run_dir),
+        trajectory=str(run_dir / "trajectory.jsonl"),
+        latest_log=latest_log or "none",
+    )
 
 
 def _secret(value) -> str:

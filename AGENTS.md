@@ -1,5 +1,8 @@
 # AGENTS.md
 
+Environment is uv
+`uv run`
+
 Autonomous CTF Solver — Operational Contract & Execution Rules (Jeopardy-Style, File/Service Challenges)
 
 ## 0. Scope & Non-Goals
