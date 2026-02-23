@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: src/sandbox/DOCKERFILE
+      cache_from:
+        - type=local,src=.buildx-cache
+      cache_to:
+        - type=local,dest=.buildx-cache,mode=max
     container_name: ctf-sandbox
     tty: true
     stdin_open: true

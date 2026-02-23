@@ -35,4 +35,22 @@ dependencies = [
     "tqdm>=4.67.3",
     "trafilatura>=2.0.0",
     "z3-solver>=4.15.8.0",
+    "pytest>=8.3.4",
+]
+
+[project.scripts]
+ig-ctf-solver = "src.main:main"
+ctfd-bootstrap = "src.ctfd_bootstrap:main"
+ctf-local-bench = "src.benchmarks.local_bench:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+norecursedirs = [
+    "data",
+    "chroma_db",
+    "runs",
+    "logs",
+    "src/agent/chroma_db",
+    "src/rag/data",
 ]

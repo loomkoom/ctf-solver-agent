@@ -53,38 +53,40 @@ import tiktoken
 from sentence_transformers import SentenceTransformer
 import chromadb
 
+from src.config import settings
+
 
 # -----------------------------
 # Config (tune these)
 # -----------------------------
-DATA_DIR = pathlib.Path("data")
+DATA_DIR = pathlib.Path(settings.links_rag_data_dir)
 RAW_HTML_DIR = DATA_DIR / "raw_html"
 RAW_REPO_DIR = DATA_DIR / "raw_repo"
 CLEAN_MD_DIR = DATA_DIR / "cleaned_md"
 CHUNKS_DIR = DATA_DIR / "chunks"
 MANIFEST_DIR = DATA_DIR / "manifests"
-CHROMA_DIR = DATA_DIR / "chroma"
+CHROMA_DIR = pathlib.Path(settings.rag_links_db_path)
 
-USER_AGENT = "ctf-kb-rag-ingestor/1.0 (+local)"
-REQUEST_TIMEOUT = 30
-HTTP_RETRIES = 2
-CRAWL_DELAY_S = 0.25
+USER_AGENT = settings.links_rag_user_agent
+REQUEST_TIMEOUT = settings.links_rag_request_timeout_s
+HTTP_RETRIES = settings.links_rag_http_retries
+CRAWL_DELAY_S = settings.links_rag_crawl_delay_s
 
 # Crawl defaults
-DEFAULT_MAX_PAGES = 80
-DEFAULT_MAX_DEPTH = 1
-WIKI_MAX_PAGES = 250
-WIKI_MAX_DEPTH = 2
+DEFAULT_MAX_PAGES = settings.links_rag_default_max_pages
+DEFAULT_MAX_DEPTH = settings.links_rag_default_max_depth
+WIKI_MAX_PAGES = settings.links_rag_wiki_max_pages
+WIKI_MAX_DEPTH = settings.links_rag_wiki_max_depth
 
 # Chunking
-CHUNK_TARGET_TOKENS = 650
-CHUNK_OVERLAP_TOKENS = 100
-MIN_CHUNK_TOKENS = 120
+CHUNK_TARGET_TOKENS = settings.links_rag_chunk_target_tokens
+CHUNK_OVERLAP_TOKENS = settings.links_rag_chunk_overlap_tokens
+MIN_CHUNK_TOKENS = settings.links_rag_min_chunk_tokens
 
 # Repo extraction
-INDEX_CODE_FILES_FROM_REPOS = False  # docs-only by default = better signal/noise
-MAX_REPO_FILE_BYTES = 1_500_000      # skip huge files
-MAX_TEXT_CHARS_PER_FILE = 120_000    # truncate very large text files
+INDEX_CODE_FILES_FROM_REPOS = settings.links_rag_index_code_files  # docs-only by default = better signal/noise
+MAX_REPO_FILE_BYTES = settings.links_rag_max_repo_file_bytes       # skip huge files
+MAX_TEXT_CHARS_PER_FILE = settings.links_rag_max_text_chars_per_file  # truncate very large text files
 REPO_DOC_EXTS = {".md", ".markdown", ".rst", ".txt", ".adoc"}
 REPO_CODE_EXTS = {
     ".py", ".c", ".cpp", ".h", ".hpp", ".go", ".rs", ".java", ".kt", ".js", ".ts",
@@ -93,11 +95,11 @@ REPO_CODE_EXTS = {
 }
 
 # Embeddings / Vector DB
-EMBED_MODEL_NAME = "BAAI/bge-base-en-v1.5"
-CHROMA_COLLECTION_NAME = "security_kb"
+EMBED_MODEL_NAME = settings.rag_embed_model
+CHROMA_COLLECTION_NAME = settings.rag_links_collection
 
 # If True, try Playwright fallback when requests returns empty/blocked pages
-ENABLE_PLAYWRIGHT_FALLBACK = False
+ENABLE_PLAYWRIGHT_FALLBACK = settings.links_rag_enable_playwright
 
 # Domain/section-specific crawl heuristics
 # (host-level overrides are possible later if you want)
@@ -550,6 +552,32 @@ def save_clean_doc(doc: SourceDoc) -> pathlib.Path:
 
     fm = "---\n" + "\n".join(f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in frontmatter.items()) + "\n---\n\n"
     out.write_text(fm + doc.content, encoding="utf-8")
+    return out
+
+
+def _kb_bucket(doc: SourceDoc) -> str:
+    section = (doc.section or "").lower()
+    domain = (doc.domain or "").lower()
+    if domain == "writeups" or section in {"blogs", "writeups"}:
+        return "writeups"
+    if section in {"cheat_sheets", "cheatsheets", "cheat-sheets", "cheatsheet"}:
+        return "cheat_sheets"
+    if section in {"tools", "tooling", "tool"}:
+        return "tool_manuals"
+    if section in {"methodologies", "methodology"}:
+        return "methodologies"
+    if section in {"references", "learning", "practice"} or domain in {"wiki", "wikis"}:
+        return "wikis"
+    return "wikis"
+
+
+def save_kb_doc(doc: SourceDoc) -> pathlib.Path:
+    base_dir = pathlib.Path(settings.knowledge_base_path)
+    bucket = _kb_bucket(doc)
+    out_dir = base_dir / bucket / safe_slug(doc.domain) / safe_slug(doc.section)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{safe_slug(doc.title)}__{doc.doc_id}.md"
+    out.write_text(doc.content, encoding="utf-8")
     return out
 
 
@@ -1024,6 +1052,7 @@ def ingest_from_yaml(yaml_path: str, embed: bool = True) -> None:
                 continue
             seen_doc_hashes.add(dh)
             save_clean_doc(d)
+            save_kb_doc(d)
             kept_docs.append(d)
             all_docs.append(d)
 

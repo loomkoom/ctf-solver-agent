@@ -198,3 +198,11 @@ data/
 *.bin
 *.sqlite3
 
+# solver runs
+runs/
+
+# buildx
+.buildx-cache/
+
+# ctfd
+.ctf/

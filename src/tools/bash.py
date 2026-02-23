@@ -15,7 +15,7 @@ class SandboxRunner:
     def __init__(self, container: str | None = None, workdir: str | None = None, timeout_s: int | None = None):
         self.container = container or settings.sandbox_container
         self.workdir = workdir or settings.sandbox_workdir
-        self.timeout_s = timeout_s or settings.sandbox_timeout_s
+        self.timeout_s = timeout_s or settings.tool_timeout_seconds
 
     def run(self, command: str) -> CommandResult:
         shell_cmd = f"cd {self.workdir} && {command}"

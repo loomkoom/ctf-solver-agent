@@ -1,61 +1,209 @@
-FROM kalilinux/kali-rolling
+# syntax=docker/dockerfile:1.7
+# # --- Stage: build Rust CLIs ---
+# FROM rust:1-bookworm AS rust-tools
+# ENV CARGO_HOME=/cargo
+# RUN --mount=type=cache,target=/cargo/registry,sharing=locked \
+#     --mount=type=cache,target=/cargo/git,sharing=locked \
+#     --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+#     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+#     cargo install cargo-binstall \
+#     && cargo binstall -y ciphey lemmeknow
+
+# # --- Stage: install ILSpyCmd tool ---
+# FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS dotnet-tools
+# RUN dotnet tool install --tool-path /opt/ilspy ilspycmd
+# # --- Stage: get dotnet runtime files ---
+# FROM mcr.microsoft.com/dotnet/runtime:8.0-bookworm-slim AS dotnet-runtime
+
+# --- Stage actual sandbox ---
+FROM kalilinux/kali-last-release
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Combine all system dependencies and tools into one layer
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# System deps + tools
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    # --- Core / build / scripting / QoL ---
     git \
     curl \
     wget \
-    default-jre-headless \
+    ca-certificates \
     python3 \
     python3-pip \
     python3-dev \
+    python3-venv \
     pipx \
     ruby \
     ruby-dev \
     build-essential \
-    nmap \
-    checksec \
-    python3-pwntools \
+    jq \
+    ripgrep \
+    dnsutils \
+    whois \
+    netcat-openbsd \
+    socat \
+    # --- Archives ---
+    p7zip-full \
+    xz-utils \
+    zip \
+    unzip \
+
+    # --- Web ---
     sqlmap \
+#     nmap \
     ffuf \
+#     gobuster \
+    feroxbuster \
+    whatweb \
+#     nikto \
+#     wfuzz \
+#     wpscan \
+#     wafw00f \
+    zaproxy \
+#     seclists \
+    wordlists \
+
+    # --- Mobile ---
+    default-jdk \
+    apktool \
+    jadx \
+    dex2jar \
+    android-sdk-platform-tools \
+    aapt \
+    apksigner \
+    zipalign \
+
+    # --- Stego / media ---
     binwalk \
     exiftool \
+    steghide \
+    stegseek \
+    stegsnow \
+    pngcheck \
+    zbar-tools \
+    qrencode \
+    imagemagick \
+    ffmpeg \
+    sox \
+
+    # --- Reversing / pwn  ---
+    checksec \
     binutils \
     ghidra \
     radare2 \
+    rizin \
+#     rizin-cutter \
+    detect-it-easy \
     gdb \
-    xz-utils \
+#     gdb-multiarch \
+    strace \
+    ltrace \
+    patchelf \
+    upx-ucl \
+#     qemu-user \
+    nasm \
+    python3-pwntools \
+    python3-ropgadget \
+
+    # --- Crypto / cracking ---
+    hashcat \
+    hashcat-utils \
+    john \
+    john-data \
+    hashid \
+    name-that-hash \
+    hashdeep \
+
+    # --- Forensics ---
+    sleuthkit \
+    foremost \
+#     scalpel \
+    tshark \
+    wireshark-common \
+    yara \
+    poppler-utils \
+    qpdf \
+    pdf-parser \
+
+#     && wget -q https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb -O /tmp/stegseek.deb \
+#     && apt-get install -y /tmp/stegseek.deb \
+    # cleanup
     && rm -rf /var/lib/apt/lists/*
 
-RUN gem install zsteg one_gadget
-RUN pipx install \
-    git+https://github.com/RsaCtfTool/RsaCtfTool \
-    ropgadget \
-    pwntools \
-    factordb-pycli \
-    slither-analyzer
-#     ciphey \
-#     graphw00f
+# # Copy Rust binaries into final image
+# COPY --from=rust-tools /usr/local/cargo/bin/ciphey /usr/local/bin/ciphey
+# COPY --from=rust-tools /usr/local/cargo/bin/lemmeknow /usr/local/bin/lemmeknow
 
-# Install Pwn tools in a dedicated block
-# pwndbg is heavy; keeping it separate helps if you need to tweak pwn logic without re-running apt
+# COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
+# COPY --from=dotnet-runtime /usr/bin/dotnet /usr/bin/dotnet
+# COPY --from=dotnet-tools /opt/ilspy /opt/ilspy
+# ENV DOTNET_ROOT=/usr/share/dotnet
+
+
+# Ruby tools
+RUN --mount=type=cache,target=/root/.cache/gem,sharing=locked \
+  gem install zsteg one_gadget
+
+# Python CLIs via pipx
+ENV PATH="/root/.local/bin:${PATH}"
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+  pipx install git+https://github.com/RsaCtfTool/RsaCtfTool \
+  && pipx install "pywhat[optimize]" \
+  && pipx install factordb-pycli \
+  && pipx install slither-analyzer \
+  && pipx install frida-tools \
+  && pipx install objection
+#   && pipx install graphw00f
+
+ARG CIPHEY_WHEEL_URL="https://github.com/liudonghua123/CipheyCore/releases/download/0.3.2/ciphey-5.14.0-py3-none-any.whl"
+ARG CIPHEYCORE_WHEEL_URL="https://github.com/liudonghua123/CipheyCore/releases/download/0.3.2/cipheycore-0.3.2-cp313-cp313-manylinux_2_31_x86_64.whl"
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    set -eux; \
+    mkdir -p /tmp/ciphey && cd /tmp/ciphey; \
+    wget -q "${CIPHEY_WHEEL_URL}"; \
+    wget -q "${CIPHEYCORE_WHEEL_URL}"; \
+    \
+    # Patch ciphey wheel dependency pin for absl-py (in-place)
+    mkdir -p w && cd w; \
+    python3 -m zipfile -e ../ciphey-5.14.0-py3-none-any.whl .; \
+    sed -i 's/^Requires-Dist: absl-py ==0\\.9\\.0$/Requires-Dist: absl-py >=0.12.0/' ciphey-5.14.0.dist-info/METADATA; \
+    rm -f ../ciphey-5.14.0-py3-none-any.whl; \
+    python3 -m zipfile -c ../ciphey-5.14.0-py3-none-any.whl .; \
+    cd ..; \
+    \
+    # Install into a dedicated venv
+    python3 -m venv /opt/ciphey; \
+    /opt/ciphey/bin/pip install -U pip setuptools wheel; \
+    /opt/ciphey/bin/pip install ./cipheycore-0.3.2-cp313-cp313-manylinux_2_31_x86_64.whl; \
+    /opt/ciphey/bin/pip install --no-deps ./ciphey-5.14.0-py3-none-any.whl; \
+    /opt/ciphey/bin/pip install \
+      "flake8>=3.8.4,<4.0.0" \
+      "appdirs>=1.4.4,<2.0.0" \
+      "base58>=2.0.1,<3.0.0" \
+      "base91>=1.0.1,<2.0.0" \
+      "cipheydists>=0.3.34,<0.4.0" \
+      "click>=7.1.2,<9.0.0" \
+      "loguru>=0.5.3,<0.6.0" \
+      "mock>=4.0.3,<5.0.0" \
+      "pybase62>=0.4.3,<0.5.0" \
+      "pylint>=2.6.0,<3.0.0" \
+      "pywhat>=0.2.5,<1.2.0" \
+      "pyyaml" \
+      "rich>=4,<11" \
+      "absl-py>=0.12.0" ; \
+    \
+    ln -sf /opt/ciphey/bin/ciphey /usr/local/bin/ciphey; \
+    ciphey --help >/dev/null; \
+    rm -rf /tmp/ciphey
+
+# Pwn tools (heavy, separate)
 RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg \
     && cd /opt/pwndbg && ./setup.sh \
     && bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
 
-# 3. External binary downloads
-# - stegseek
-# - pwninit
-# - kube-hunter
-# RUN wget -q https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1_amd64.deb -O /tmp/stegseek.deb && \
-#     apt-get update && apt-get install -y /tmp/stegseek.deb && \
-#     wget -q https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit && \
-#     chmod +x /usr/local/bin/pwninit && \
-#     curl -sSfL https://raw.githubusercontent.com/aquasecurity/kube-hunter/main/install.sh | sh && \
-#     rm -rf /tmp/* /var/lib/apt/lists/*
+# External binary downloads: pwninit
+RUN wget -q https://github.com/io12/pwninit/releases/download/v3.3.0/pwninit -O /usr/local/bin/pwninit \
+    && chmod +x /usr/local/bin/pwninit \
 
-# 4. Final configuration
 WORKDIR /challenge
-
 CMD ["sleep", "infinity"]

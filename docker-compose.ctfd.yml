@@ -1,0 +1,22 @@
+services:
+  ctfd:
+    image: ctfd/ctfd:latest
+    container_name: ctfd-local
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=${CTFD_SECRET_KEY:-secret}
+      - DATABASE_URL=sqlite:////data/ctfd.db
+      - REDIS_URL=redis://redis:6379
+      - UPLOAD_FOLDER=/data/uploads
+    volumes:
+      - ctfd-data:/data
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: ctfd-redis
+
+volumes:
+  ctfd-data:
