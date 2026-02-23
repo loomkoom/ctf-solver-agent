@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
+    default-jre-headless \
     python3 \
     python3-pip \
     python3-dev \
@@ -14,11 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ruby-dev \
     build-essential \
     nmap \
+    checksec \
     python3-pwntools \
     sqlmap \
     ffuf \
     binwalk \
     exiftool \
+    binutils \
+    ghidra \
     radare2 \
     gdb \
     xz-utils \
@@ -54,6 +58,4 @@ RUN git clone https://github.com/pwndbg/pwndbg /opt/pwndbg \
 # 4. Final configuration
 WORKDIR /challenge
 
-COPY . .
-
-CMD ["python3", "src/main.py"]
+CMD ["sleep", "infinity"]

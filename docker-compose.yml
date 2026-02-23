@@ -1,0 +1,10 @@
+services:
+  ctf-sandbox:
+    build:
+      context: .
+      dockerfile: src/sandbox/DOCKERFILE
+    container_name: ctf-sandbox
+    tty: true
+    stdin_open: true
+    volumes:
+      - ./data:/host_data

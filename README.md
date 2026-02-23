@@ -1,21 +1,38 @@
-docker run -d --name ctf-sandbox kalilinux/kali-rolling sleep infinity
+## AI CTF Solver (LangGraph + Kali Sandbox)
 
-irm https://ollama.com/install.ps1 | iex
-ollama pull deepseek-v3
-(400GB)
-ollama pull qwen2.5-coder:7b
-(4gb)
+### Quick start
+1) Build and run the Kali sandbox:
 
-# Core security & reversing
-uv add sympy pwntools z3-solver ROPGadget
+```bash
+docker compose build ctf-sandbox
+docker compose up -d ctf-sandbox
+```
 
-# Mathematics & Crypto (Heavy)
-uv add gmpy2 pycryptodomex primefac factordb-pycli
+2) Run the solver against a CTFd instance:
 
-# Media & Forensics
-uv add opencv-python Pillow png-parser morse-audio-decoder
+```bash
+uv run python src/main.py --ctfd-url https://ctfd.example.com --ctfd-token <token>
+```
 
-# Web & Data
-uv add requests beautifulsoup4 Flask pandas numpy
+### Environment variables
+Create a `.env` with the model and CTFd credentials you want to use:
 
-uv add angr sagemath
+```
+OPENAI_API_KEY=...
+CTFD_URL=https://ctfd.example.com
+CTFD_TOKEN=...
+```
+
+### Knowledge base (RAG)
+- Drop writeups, HackTricks, or CTF-Wiki markdowns under:
+  - `data/knowledge_base/writeups`
+  - `data/knowledge_base/wikis/hacktricks`
+  - `data/knowledge_base/wikis/ctf-wiki`
+- The solver will ingest on startup unless `--skip-rag` is passed.
+
+### Benchmark runner (NYU CTF Bench style)
+Run against a local dataset tree:
+
+```bash
+uv run python src/benchmarks/nyu_ctf_bench.py --bench data/test_bench/ulyssisctf --limit 25
+```

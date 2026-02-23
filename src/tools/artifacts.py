@@ -6,8 +6,16 @@ def list_challenge_artifacts(source_path: str):
     Lists files in the artifacts directory matching the source_path of a writeup.
     Example input: 'angstrom/2021/pwn/pawn'
     """
-    # Map 'knowledge_base/writeups' path to 'artifacts' path
-    artifact_base = Path("data/artifacts") / source_path
+    if not source_path:
+        return "No source path provided."
+
+    clean_path = source_path.replace("\\", "/")
+    if clean_path.startswith("writeups/"):
+        clean_path = clean_path[len("writeups/"):]
+    if clean_path.endswith(".md"):
+        clean_path = str(Path(clean_path).parent)
+
+    artifact_base = Path("data/artifacts") / clean_path
 
     if not artifact_base.exists():
         return f"No artifact folder found at {artifact_base}"

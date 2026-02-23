@@ -1,0 +1,205 @@
+domains:
+
+  wiki:
+    references:
+      - "https://ctf101.org/"
+      - "https://ctf-wiki.mahaloz.re/"
+      - "https://ctf-wiki.github.io/ctf-tools/"
+      - "https://ctf-wiki.org/en/"
+      - "https://wiki.bi0s.in"
+      - "https://book.hacktricks.xyz"
+      - "https://book.hacktricks.xyz/generic-methodologies-and-resources/pentesting-methodology"
+
+  other:
+    learning:
+      - "https://fareedfauzi.gitbook.io/ctf-checklist-for-beginner/"
+      - "https://doubtfulturnip.gitbook.io/dts-cybersecurity-tool-kit/"
+      - "https://trailofbits.github.io/ctf/"
+      - "https://www.hacker101.com/resources"
+      - "https://www.vulnhub.com/resources/"
+      - "https://github.com/osirislab/Project-Ideas/wiki"
+    cheat_sheets:
+      - "https://web.archive.org/web/20200907022340/https://github.com/uppusaikiran/awesome-ctf-cheatsheet"
+      - "https://dvd848.github.io/CTFs/CheatSheet.html"
+      - "https://gist.github.com/yehgdotnet/ec6ae948a6735d66f6eaff2ef60649a3"
+
+  web:
+    references:
+      - "https://portswigger.net/web-security"
+      - "https://owasp.org/www-project-web-security-testing-guide/"
+      - "https://owasp.org/www-community/attacks/"
+      - "https://cheatsheetseries.owasp.org/"
+    tools:
+      - "https://github.com/s0md3v/XSStrike"
+      - "https://github.com/sqlmapproject/sqlmap"
+      - "https://github.com/ticarpi/jwt_tool"
+      - "https://github.com/danielmiessler/SecLists/tree/master/Fuzzing"
+      - "https://github.com/projectdiscovery/nuclei"
+      - "https://github.com/projectdiscovery/httpx"
+      - "https://github.com/projectdiscovery/subfinder"
+      - "https://github.com/blechschmidt/massdns"
+      - "https://github.com/vavkamil/awesome-bugbounty-tools"
+      - "https://github.com/swisskyrepo/SSRFmap"
+      - "https://github.com/evyatarmeged/Raccoon"
+
+  osint:
+    tools:
+      - "https://whatsmyname.app/"
+      - "https://www.digitalfootprintcheck.com"
+      - "https://github.com/sherlock-project/sherlock"
+      - "https://github.com/p1ngul1n0/blackbird"
+      - "https://epios.com/"
+      - "https://github.com/megadose/holehe"
+      - "https://haveibeenpwned.com/"
+      - "https://breachdirectory.org/"
+      - "https://wigle.net/"
+      - "https://www.start.umd.edu/data-tools/GTD"
+      - "https://www.interpol.int/en/How-we-work/Notices/Red-Notices/View-Red-Notices"
+
+  pwn:
+    references:
+      - "https://ir0nstone.gitbook.io/notes/"
+      - "https://maxkersten.nl/binary-analysis-course/"
+      - "https://beginners.re/"
+      - "https://tc.gts3.org/cs6265/tut/tut00-intro.html"
+      - "https://github.com/Naetw/CTF-pwn-tips"
+      - "https://vreugdenhil.dev/pwn_guide/"
+    tools:
+      - "https://www.sourceware.org/gdb/"
+      - "https://github.com/hugsy/gef"
+      - "https://ghidra-sre.org/"
+      - "https://github.com/Gallopsled/pwntools"
+      - "https://github.com/niklasb/libc-database"
+      - "https://cutter.re/"
+      - "https://hex-rays.com/ida-pro/"
+      - "https://binary.ninja/"
+
+  crypto:
+    references:
+      - "https://cryptohack.org/"
+      - "https://cryptohack.gitbook.io/cryptobook/"
+      - "https://www.crypto101.io/"
+    tools:
+      - "https://gchq.github.io/CyberChef/"
+      - "https://www.dcode.fr/en"
+      - "https://www.cryptool.org/en/ct2"
+      - "https://www.pycrypto.org/"
+    cheat_sheets:
+      - "https://pequalsnp-team.github.io/cheatsheet/crypto-101"
+
+  stego:
+    references:
+      - "https://0xrick.github.io/lists/stego/"
+      - "https://www.brianveitch.com/websites/cryptography/steganography.html"
+    cheat_sheets:
+      - "https://pequalsnp-team.github.io/cheatsheet/steganography-101"
+    tools:
+      - "https://www.aperisolve.com/"
+      - "https://github.com/RickdeJager/stegseek"
+      - "https://github.com/zed-0xff/zsteg"
+      - "https://github.com/abeluck/stegdetect"
+      - "https://github.com/DominicBreuker/stego-toolkit"
+      - "https://github.com/GuidoBartoli/sherloq"
+      - "https://github.com/evyatarmeged/stegsolve"
+
+  forensics:
+    references:
+      - "https://trailofbits.github.io/ctf/forensics/"
+      - "https://digital-forensics.sans.org/community/"
+      - "https://github.com/welchbj/ctf/blob/master/docs/forensics.md"
+    tools:
+      - "https://www.autopsy.com/"
+      - "https://www.sleuthkit.org/"
+      - "https://www.sans.org/tools/sift-workstation/"
+      - "https://guymager.sourceforge.io/"
+      - "https://volatilityfoundation.org/"
+      - "https://github.com/volatilityfoundation/volatility3"
+      - "https://www.exiftool.org/"
+      - "https://github.com/ReFirmLabs/binwalk"
+      - "https://github.com/korczis/foremost"
+      - "https://www.sonicvisualiser.org/"
+      - "https://github.com/Velocidex/velociraptor"
+
+  mobile:
+    tools:
+      - "https://github.com/skylot/jadx/"
+      - "https://github.com/quark-engine/quark-engine"
+      - "https://github.com/MobSF/Mobile-Security-Framework-MobSF"
+      - "https://ibotpeaches.github.io/Apktool/"
+      - "https://frida.re/"
+      - "https://hextree.io/"
+      - "https://www.genymotion.com/"
+      - "https://developer.android.com/tools/adb"
+      - "https://portswigger.net/burp"
+
+  blockchain:
+    references:
+      - "https://docs.soliditylang.org/"
+      - "https://consensys.github.io/smart-contract-best-practices/"
+      - "https://github.com/crytic/not-so-smart-contracts"
+    tools:
+      - "https://remix.ethereum.org/"
+      - "https://github.com/foundry-rs/foundry"
+      - "https://hardhat.org/"
+      - "https://github.com/crytic/slither"
+      - "https://github.com/trailofbits/manticore"
+      - "https://github.com/ConsenSys/mythril"
+
+  passwords:
+    tools:
+      - "https://github.com/vanhauser-thc/thc-hydra"
+      - "https://github.com/ffuf/ffuf"
+      - "https://github.com/j00ru/medusa"
+      - "https://github.com/lanjelot/patator"
+      - "https://www.openwall.com/john/"
+      - "https://hashcat.net/hashcat/"
+      - "https://github.com/Mebus/cupp"
+      - "https://github.com/digininja/CeWL"
+      - "https://github.com/danielmiessler/SecLists"
+
+  misc_utilities:
+    tools:
+      - "https://gtfobins.github.io/"
+      - "https://lolbas-project.github.io/"
+      - "https://www.revshells.com/"
+      - "https://github.com/reider-roque/pentest-tools/blob/master/file-tranferring/web-servers.md"
+      - "https://tomeko.net/online_tools/hex_to_file.php?lang=en"
+      - "https://www.boxentriq.com/code-breaking/hex-analysis"
+      - "https://www.useragentstring.com/pages/useragentstring.php?name=Netscape"
+
+  writeups:
+    blogs:
+      - "https://0xrick.github.io/categories/"
+      - "https://medium.com/@xiosec/tryhackme-reversing-elf-60ab96969e41"
+      - "https://abawazeeer.medium.com/kaizen-ctf-2018-reverse-engineer-usb-keystrok-from-pcap-file-2412351679f4"
+      - "https://www.geeksforgeeks.org/text-detection-and-extraction-using-opencv-and-ocr/"
+
+  practice:
+    references:
+      - "https://ctftime.org/"
+      - "https://ctflearn.com/"
+      - "https://archive.ooo/"
+      - "https://overthewire.org/wargames/"
+      - "https://www.hackthebox.com/"
+      - "https://tryhackme.com/"
+      - "https://ctftime.org/writeups"
+      - "https://www.youtube.com/@ippsec/"
+      - "https://pentestbook.six2dez.com"
+      - "https://cryptopals.com/"
+      - "https://ctftime.org/ctf/317/"
+      - "https://ethernaut.openzeppelin.com/"
+meta_collections:
+  link_directories:
+      - "https://github.com/wtsxDev/reverse-engineering"
+      - "https://github.com/OpenToAllCTF/Tips"
+      - "https://github.com/piratemoo/pentestchecklist"
+      - "https://github.com/enaqx/awesome-pentest"
+      - "https://github.com/sbilly/awesome-security"
+      - "https://github.com/onlurking/awesome-infosec"
+      - "https://github.com/carpedm20/awesome-hacking"
+      - "https://github.com/paragonie/awesome-appsec"
+      - "https://github.com/qazbnm456/awesome-web-security"
+      - "https://github.com/cugu/awesome-forensics"
+      - "https://github.com/apsdehal/awesome-ctf"
+      - "https://github.com/JohnHammond/ctf-katana"
+
