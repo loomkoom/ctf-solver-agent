@@ -1,0 +1,162 @@
+{
+  "challenge_id": "caesar-salad-jump",
+  "challenge_name": "caesar-salad-jump",
+  "category": "unknown",
+  "flag_candidates": [],
+  "flag_hits": [],
+  "submitted_flags": [
+    "VTPGS{Pbby_or4af}"
+  ],
+  "iteration": 14,
+  "done": true,
+  "attempts": [
+    {
+      "step": 1,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "cd /challenge/local/20260223T232021Z/caesar-salad-jump && cat flag.txt",
+      "stdout": "flag: 566c525152314e3755474a6965563976636a52685a6e303d",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232022860171Z.txt"
+    },
+    {
+      "step": 2,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | base64 -d",
+      "stdout": "\u00e7\u00ae\u0153\u00e7nu\u00e7m\u00f5\u00e1\u00ed\u00fb\u00e7\u017e;\u00e1\u00ae\u00bd\u00eb\u017ez\u00df\u00de\u00fa\u00eb~\u0161\u00e7n\u00bc\u00e5\u00ae\u017e\u00dfM\u00dd",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232024922915Z.txt"
+    },
+    {
+      "step": 3,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | xxd -r -p | strings",
+      "stdout": "",
+      "stderr": "bash: line 1: xxd: command not found\n",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232026445268Z.txt"
+    },
+    {
+      "step": 4,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | xxd -r -p | tr -d '\\0'",
+      "stdout": "",
+      "stderr": "bash: line 1: xxd: command not found\n",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232028356203Z.txt"
+    },
+    {
+      "step": 5,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | xxd -r -p 2>/dev/null | strings",
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232029650183Z.txt"
+    },
+    {
+      "step": 6,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | xxd -r -p",
+      "stdout": "",
+      "stderr": "bash: line 1: xxd: command not found\n",
+      "exit_code": 127,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232031133398Z.txt"
+    },
+    {
+      "step": 7,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | xxd -p -r",
+      "stdout": "",
+      "stderr": "bash: line 1: xxd: command not found\n",
+      "exit_code": 127,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232032173027Z.txt"
+    },
+    {
+      "step": 8,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo 566c525152314e3755474a6965563976636a52685a6e303d | python3 -c \"import binascii; import sys; print(binascii.unhexlify(sys.stdin.read()).decode('utf-8', errors='ignore'))\"",
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import binascii; import sys; print(binascii.unhexlify(sys.stdin.read()).decode('utf-8', errors='ignore'))\n                                       ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nbinascii.Error: Odd-length string\n",
+      "exit_code": 1,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232033709216Z.txt"
+    },
+    {
+      "step": 9,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo 566c525152314e3755474a6965563976636a52685a6e303d | sed 's/.$//' | python3 -c \"import binascii; import sys; print(binascii.unhexlify(sys.stdin.read()).decode('utf-8', errors='ignore'))\"",
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import binascii; import sys; print(binascii.unhexlify(sys.stdin.read()).decode('utf-8', errors='ignore'))\n                                       ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nbinascii.Error: Non-hexadecimal digit found\n",
+      "exit_code": 1,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232035520968Z.txt"
+    },
+    {
+      "step": 10,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d==\" | base64 -d",
+      "stdout": "\u00e7\u00ae\u0153\u00e7nu\u00e7m\u00f5\u00e1\u00ed\u00fb\u00e7\u017e;\u00e1\u00ae\u00bd\u00eb\u017ez\u00df\u00de\u00fa\u00eb~\u0161\u00e7n\u00bc\u00e5\u00ae\u017e\u00dfM\u00dd",
+      "stderr": "base64: invalid input\n",
+      "exit_code": 1,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232036614810Z.txt"
+    },
+    {
+      "step": 11,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | base64 -d 2>/dev/null | xxd -p",
+      "stdout": "",
+      "stderr": "bash: line 1: xxd: command not found\n",
+      "exit_code": 127,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232037609686Z.txt"
+    },
+    {
+      "step": 12,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "apt-get update && apt-get install -y xxd",
+      "stdout": "Hit:1 http://http.kali.org/kali kali-last-snapshot InRelease\nReading package lists...\nReading package lists...\nBuilding dependency tree...\nReading state information...\nSolving dependencies...\nThe following NEW packages will be installed:\n  xxd\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\nNeed to get 100.0 kB of archives.\nAfter this operation, 162 kB of additional disk space will be used.\nGet:1 http://kali.download/kali kali-last-snapshot/main amd64 xxd amd64 2:9.1.1882-1 [100.0 kB]\nFetched 100.0 kB in 1s (77.0 kB/s)\nSelecting previously unselected package xxd.\n(Reading database ... \n(Reading database ... 5%\n(Reading database ... 10%\n(Reading database ... 15%\n(Reading database ... 20%\n(Reading database ... 25%\n(Reading database ... 30%\n(Reading database ... 35%\n(Reading database ... 40%\n(Reading database ... 45%\n(Reading database ... 50%\n(Reading database ... 55%\n(Reading database ... 60%\n(Reading database ... 65%\n(Reading database ... 70%\n(Reading database ... 75%\n(Reading database ... 80%\n(Reading database ... 85%\n(Reading database ... 90%\n(Reading database ... 95%\n(Reading database ... 100%\n(Reading database ... 70764 files and directories currently installed.)\nPreparing to unpack .../xxd_2%3a9.1.1882-1_amd64.deb ...\nUnpacking xxd (2:9.1.1882-1) ...\nSetting up xxd (2:9.1.1882-1) ...\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232043301829Z.txt"
+    },
+    {
+      "step": 13,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo \"566c525152314e3755474a6965563976636a52685a6e303d\" | xxd -r -p | base64 -d 2>/dev/null",
+      "stdout": "VTPGS{Pbby_or4af}",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260223T232045507381Z.txt"
+    }
+  ],
+  "reasoning_log": [],
+  "run_dir": "runs\\caesar-salad-jump",
+  "tool_calls": 13,
+  "phase_cycles": 0,
+  "category_pivots": 0
+}

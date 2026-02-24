@@ -1,0 +1,85 @@
+{
+  "challenge_id": "caesar-salad-jump",
+  "challenge_name": "caesar-salad-jump",
+  "category": "unknown",
+  "flag_candidates": [],
+  "flag_hits": [],
+  "submitted_flags": [
+    "IGCTF{Cool_be4ns}"
+  ],
+  "iteration": 6,
+  "done": true,
+  "attempts": [
+    {
+      "step": 1,
+      "phase": "triage",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "find /challenge/local/20260224T005126Z/caesar-salad-jump -maxdepth 1 -type f -print0 | xargs -0 -r file",
+      "stdout": "/challenge/local/20260224T005126Z/caesar-salad-jump/flag.txt: ASCII text, with no line terminators\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260224T005127276739Z.txt"
+    },
+    {
+      "step": 2,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "cat /challenge/local/20260224T005126Z/caesar-salad-jump/flag.txt",
+      "stdout": "flag: 566c525152314e3755474a6965563976636a52685a6e303d",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260224T005128487503Z.txt"
+    },
+    {
+      "step": 3,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo '566c525152314e3755474a6965563976636a52685a6e303d' | xxd -r -p",
+      "stdout": "VlRQR1N7UGJieV9vcjRhZn0=",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260224T005129542907Z.txt"
+    },
+    {
+      "step": 4,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo 'VlRQR1N7UGJieV9vcjRhZn0=' | base64 -d",
+      "stdout": "VTPGS{Pbby_or4af}",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260224T005130655148Z.txt"
+    },
+    {
+      "step": 5,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo 'VTPGS{Pbby_or4af}' | ciphey",
+      "stdout": "Failed to crack\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260224T005131971093Z.txt"
+    },
+    {
+      "step": 6,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "echo 'Pbby_or4af' | tr 'A-Za-z' 'N-ZA-Mn-za-m'",
+      "stdout": "Cool_be4ns\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\caesar-salad-jump\\logs\\bash_20260224T005132940672Z.txt"
+    }
+  ],
+  "reasoning_log": [],
+  "run_dir": "runs\\caesar-salad-jump",
+  "tool_calls": 6,
+  "phase_cycles": 0,
+  "category_pivots": 0
+}

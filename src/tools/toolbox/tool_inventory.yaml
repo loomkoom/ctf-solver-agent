@@ -127,7 +127,7 @@ tools:
     wrapper: not_supported
     verify_cmd: "zaproxy -h"
     default_timeout_s: 30
-    allowed: false
+    allowed: true
     notes: |
       GUI-heavy DAST tool; not suitable for automated sandbox runs.
       Prefer lightweight web probes and explicit endpoints only.
@@ -139,7 +139,7 @@ tools:
     wrapper: not_supported
     verify_cmd: "sqlmap --version"
     default_timeout_s: 30
-    allowed: false
+    allowed: true
     notes: |
       Automated SQLi scanner is disallowed in this environment.
       Use manual, targeted testing when explicitly permitted.

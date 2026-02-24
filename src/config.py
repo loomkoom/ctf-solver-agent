@@ -18,21 +18,21 @@ class Settings(BaseSettings):
     # --- Tiered Model Selection ---
     # Strategic thinking (The Architect)
     planner_provider: str = "openai"
-    planner_model: str = "o3"
+    planner_model: str = "gpt-4o"
     planner_tiers: str = ""
-    planner_max_tokens: int = 400
+    planner_max_tokens: int = 8192
 
     # Fast task execution (The Grunt)
-    executor_provider: str = "ollama"
-    executor_model: str = "qwen2.5-coder:14b-instruct"
+    executor_provider: str = "openai"
+    executor_model: str = "gpt-4o"
     executor_tiers: str = ""
-    executor_max_tokens: int = 300
+    executor_max_tokens: int = 8192
 
     # Verification / critique
     verifier_provider: str = "openai"
-    verifier_model: str = "o4-mini"
+    verifier_model: str = "gpt-4o"
     verifier_tiers: str = ""
-    verifier_max_tokens: int = 400
+    verifier_max_tokens: int = 8192
 
     # --- Tier routing thresholds (comma-separated) ---
     tier_phase_cycles: str = "3,6,10"
@@ -49,14 +49,14 @@ class Settings(BaseSettings):
     sandbox_container: str = "ctf-sandbox"
     sandbox_workdir: str = "/challenge"
     tool_timeout_seconds: int = 30
-    max_wall_seconds_per_challenge: int = 600
-    max_tool_calls: int = 15
-    max_phase_cycles: int = 20
+    max_wall_seconds_per_challenge: int = 1800
+    max_tool_calls: int = 60
+    max_phase_cycles: int = 50
     max_category_pivots: int = 3
     sandbox_timeout_s: int = 30
-    max_iterations: int = 20
+    max_iterations: int = 60
     knowledge_base_path: str = "./data/knowledge_base"
-    flag_format: str = "flag{"
+    flag_format: str = "IGCTF{"
     runs_dir: str = "runs"
     output_large_line_threshold: int = 300
     output_large_char_threshold: int = 20000

@@ -3,6 +3,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from langchain_core.tools import tool
+
 from src.tools.bash import SandboxRunner
 
 
@@ -478,3 +480,49 @@ class Toolbox:
 
     def _shell_escape(self, value: str) -> str:
         return json.dumps(value)
+
+
+_DEFAULT_TOOLBOX: Toolbox | None = None
+
+
+def set_default_toolbox(toolbox: Toolbox) -> None:
+    global _DEFAULT_TOOLBOX
+    _DEFAULT_TOOLBOX = toolbox
+
+
+@tool("bash")
+def bash_tool(command: str) -> dict:
+    """Execute any shell command in the Kali CTF sandbox.
+    All CTF tools are available: python3, pwntools, ghidra (analyzeHeadless),
+    r2, gdb+pwndbg, checksec, binwalk, steghide, stegseek, zsteg, exiftool,
+    tshark, foremost, hashcat, john, RsaCtfTool, ciphey, ffuf, strings,
+    objdump, file, xxd, 7z, curl, nc, and all standard Kali tools.
+    Chain commands with pipes. Files are in /challenge/."""
+    toolbox = _DEFAULT_TOOLBOX or Toolbox()
+    result = toolbox.run(command, tool_name="bash")
+    stdout = (result.stdout or "")
+    stderr = (result.stderr or "")
+    if len(stdout) > 6000:
+        stdout = stdout[-6000:]
+    if len(stderr) > 1000:
+        stderr = stderr[-1000:]
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "exit_code": result.exit_code,
+    }
+
+
+def make_bash_tool(toolbox: Toolbox):
+    set_default_toolbox(toolbox)
+    return bash_tool
+
+
+@tool("submit_flag")
+def submit_flag_tool(flag: str) -> str:
+    """Submit a CTF flag when found."""
+    return flag
+
+
+def make_submit_flag_tool(connector=None, challenge_id=None):
+    return submit_flag_tool

@@ -56,7 +56,12 @@ class SandboxRunner:
                 timeout=self.timeout_s
             )
         except subprocess.TimeoutExpired:
-            return CommandResult(stdout="", stderr=f"Command timed out after {self.timeout_s} seconds.", exit_code=124)
+            try:
+                process.kill()
+                process.wait(timeout=5)
+            except Exception:
+                pass
+            return CommandResult(stdout="", stderr=f"Command timed out after {self.timeout_s}s.", exit_code=124)
 
         return CommandResult(
             stdout=result.stdout,

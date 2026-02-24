@@ -1,0 +1,119 @@
+{
+  "challenge_id": "4",
+  "challenge_name": "blog",
+  "category": "misc",
+  "flag_candidates": [
+    "IGCTF{Find my flag! 4ae82557-42bc-42db-bf57-1ee53a90737d}"
+  ],
+  "flag_hits": [
+    {
+      "flag": "IGCTF{Find my flag! 4ae82557-42bc-42db-bf57-1ee53a90737d}",
+      "step": 0,
+      "tool": "cat /challenge/ctfd/4/blog/src_extra/src/IGCTF{Find-m/index.html",
+      "command": "cat /challenge/ctfd/4/blog/src_extra/src/IGCTF{Find-m/index.html",
+      "evidence": "<title>IGCTF{Find my flag! 4ae82557-42bc-42db-bf57-1ee53a90737d}</title>",
+      "evidence_type": "stdout",
+      "log_path": "runs\\4\\logs\\bash_20260224T005154149615Z.txt"
+    }
+  ],
+  "submitted_flags": [
+    "IGCTF{Find my flag! 4ae82557-42bc-42db-bf57-1ee53a90737d}"
+  ],
+  "iteration": 7,
+  "done": true,
+  "attempts": [
+    {
+      "step": 1,
+      "phase": "triage",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "find /challenge/ctfd/4 -maxdepth 1 -type f -print0 | xargs -0 -r file",
+      "stdout": "/challenge/ctfd/4/blog.zip: Zip archive data, made by v2.0, extract using at least v2.0, last modified Feb 05 2022 22:55:12, uncompressed size 114, method=deflate\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005148252163Z.txt"
+    },
+    {
+      "step": 2,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "unzip /challenge/ctfd/4/blog.zip -d /challenge/ctfd/4/blog",
+      "stdout": "Archive:  /challenge/ctfd/4/blog.zip\n  inflating: /challenge/ctfd/4/blog/README.md  \n  inflating: /challenge/ctfd/4/blog/src.zip  \n  inflating: /challenge/ctfd/4/blog/src/index.html  \n  inflating: /challenge/ctfd/4/blog/src/awesome-reci/index.html  \n  inflating: /challenge/ctfd/4/blog/src/club-penguin/index.html  \n  inflating: /challenge/ctfd/4/blog/src/discord-amon/index.html  \n  inflating: /challenge/ctfd/4/blog/src/my-best-frie/index.html  \n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005149173578Z.txt"
+    },
+    {
+      "step": 3,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "grep -r 'IGCTF{' /challenge/ctfd/4/blog/src/",
+      "stdout": "/challenge/ctfd/4/blog/src/awesome-reci/index.html:    <a href=\"The flag is IGCTF{Find my...... haha, no\"></a>\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005149955217Z.txt"
+    },
+    {
+      "step": 4,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "grep -ri 'flag' /challenge/ctfd/4/blog/src/",
+      "stdout": "/challenge/ctfd/4/blog/src/awesome-reci/index.html:    <a href=\"The flag is IGCTF{Find my...... haha, no\"></a>\n/challenge/ctfd/4/blog/src/my-best-frie/index.html:    <a href=\"Which URL would contain the flag...?? \u00f0\u0178\u00a4\u201d\"></a>\n/challenge/ctfd/4/blog/src/discord-amon/index.html:    <a href=\"Which URL would contain the flag...?? \u00f0\u0178\u00a4\u201d\"></a>\n/challenge/ctfd/4/blog/src/club-penguin/index.html:    <a href=\"Which URL would contain the flag...?? \u00f0\u0178\u00a4\u201d\"></a>\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005150685304Z.txt"
+    },
+    {
+      "step": 5,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "strings /challenge/ctfd/4/blog/src.zip | grep 'IGCTF'",
+      "stdout": "src/IGCTF{Find-m/UT\nsrc/IGCTF{Find-m/index.htmlUT\nsrc/IGCTF{Find-m/UT\nsrc/IGCTF{Find-m/index.htmlUT\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005151647873Z.txt"
+    },
+    {
+      "step": 6,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "unzip /challenge/ctfd/4/blog/src.zip -d /challenge/ctfd/4/blog/src_extra",
+      "stdout": "Archive:  /challenge/ctfd/4/blog/src.zip\n   creating: /challenge/ctfd/4/blog/src_extra/src/\n  inflating: /challenge/ctfd/4/blog/src_extra/src/index.html  \n   creating: /challenge/ctfd/4/blog/src_extra/src/IGCTF{Find-m/\n  inflating: /challenge/ctfd/4/blog/src_extra/src/IGCTF{Find-m/index.html  \n   creating: /challenge/ctfd/4/blog/src_extra/src/awesome-reci/\n  inflating: /challenge/ctfd/4/blog/src_extra/src/awesome-reci/index.html  \n   creating: /challenge/ctfd/4/blog/src_extra/src/club-penguin/\n  inflating: /challenge/ctfd/4/blog/src_extra/src/club-penguin/index.html  \n   creating: /challenge/ctfd/4/blog/src_extra/src/discord-amon/\n  inflating: /challenge/ctfd/4/blog/src_extra/src/discord-amon/index.html  \n   creating: /challenge/ctfd/4/blog/src_extra/src/my-best-frie/\n  inflating: /challenge/ctfd/4/blog/src_extra/src/my-best-frie/index.html  \n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005152687144Z.txt"
+    },
+    {
+      "step": 7,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "ls /challenge/ctfd/4/blog/src_extra/src/IGCTF{Find-m/",
+      "stdout": "index.html\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005153464457Z.txt"
+    },
+    {
+      "step": 8,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "cat /challenge/ctfd/4/blog/src_extra/src/IGCTF{Find-m/index.html",
+      "stdout": "<!DOCTYPE html>\n<html>\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width\">\n    <title>IGCTF{Find my flag! 4ae82557-42bc-42db-bf57-1ee53a90737d}</title>\n  </head>\n  <body>\n    <h1>IGCTF{Find my flag! 4ae82557-42bc-42db-bf57-1ee53a90737d}</h1>\n    <p>\n    You found it! Yay! :3\n    </p>\n  </body>\n</html>\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\4\\logs\\bash_20260224T005154149615Z.txt"
+    }
+  ],
+  "reasoning_log": [],
+  "run_dir": "runs\\4",
+  "tool_calls": 8,
+  "phase_cycles": 0,
+  "category_pivots": 0
+}

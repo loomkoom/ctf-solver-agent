@@ -2,6 +2,7 @@ import json
 import re
 import time
 import shlex
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -23,8 +24,10 @@ from src.debug_log import debug_log, head_lines, preview_text, redact
 
 MAX_RAG_CHARS = 3500
 DEFAULT_FLAG_REGEX = r"\b[A-Za-z0-9_\-]{0,24}\{[^\n\r]{3,200}\}\b"
-CTF_PREFIX_FLAG_REGEX = r"(?:IGCTF|flag|CSCBE|UCTF|ctf)\{.*?\}"
+CTF_PREFIX_FLAG_REGEX = r"(?:flag|IGCTF|ctf|picoCTF|HTB|TBTL)\{[^}]{1,200}\}"
 DEBUG_TOOL_PREVIEW_LINES = 8
+HEX_CANDIDATE_RE = re.compile(r"\b[0-9a-fA-F]{16,}\b")
+BASE64_CANDIDATE_RE = re.compile(r"\b[A-Za-z0-9+/]{12,}={0,2}\b")
 
 _TOOL_ALIASES = {
     "cat": "read_file",
@@ -154,15 +157,71 @@ def _extract_message_text(message) -> str:
     return text
 
 
+def _extract_refusal_data(message) -> tuple[bool, str]:
+    if message is None:
+        return False, ""
+    refusal_present = False
+    refusal_text = ""
+
+    additional = getattr(message, "additional_kwargs", {}) or {}
+    if "refusal" in additional:
+        refusal_present = True
+        if additional.get("refusal"):
+            refusal_text = str(additional.get("refusal"))
+
+    if hasattr(message, "refusal"):
+        refusal_present = True
+        val = getattr(message, "refusal")
+        if val:
+            refusal_text = str(val)
+
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                if "refusal" in block:
+                    refusal_present = True
+                    if block.get("refusal"):
+                        refusal_text = str(block.get("refusal"))
+                        break
+                if block.get("type") == "refusal" and block.get("text"):
+                    refusal_present = True
+                    refusal_text = str(block.get("text"))
+                    break
+            else:
+                if hasattr(block, "refusal"):
+                    refusal_present = True
+                    val = getattr(block, "refusal")
+                    if val:
+                        refusal_text = str(val)
+                        break
+
+    return refusal_present, refusal_text
+
+
+def _response_needs_retry(message) -> tuple[bool, str]:
+    text = _extract_message_text(message)
+    refusal_present, refusal_text = _extract_refusal_data(message)
+    if refusal_present:
+        return True, "refusal" if refusal_text else "refusal-empty"
+    if not (text or "").strip():
+        return True, "empty"
+    return False, ""
+
+
 def _summarize_llm_response(message) -> dict:
     content = getattr(message, "content", None)
     additional = getattr(message, "additional_kwargs", {}) or {}
     metadata = getattr(message, "response_metadata", {}) or {}
+    refusal_present, refusal_text = _extract_refusal_data(message)
     summary = {
         "content_type": type(content).__name__,
         "content_preview": preview_text(redact(str(content)), 200) if content is not None else "",
         "additional_keys": list(additional.keys()),
         "response_metadata_keys": list(metadata.keys()),
+        "refusal_present": refusal_present,
+        "refusal_len": len(refusal_text or "") if refusal_present else 0,
+        "refusal_preview": preview_text(redact(refusal_text), 120) if refusal_present else "",
     }
     if isinstance(content, list):
         block_types: list[str] = []
@@ -190,7 +249,15 @@ def _fallback_llm_response(role: str, state: DCipherState) -> AIMessage:
     return AIMessage(content=hint)
 
 
-def _invoke_llm(llm, messages, state: DCipherState, role: str, tier, purpose: str):
+def _invoke_llm(
+    llm,
+    messages,
+    state: DCipherState,
+    role: str,
+    tier,
+    purpose: str,
+    fallback_on_empty: bool = True,
+):
     summary = _summarize_messages(messages)
     max_tokens = tier.max_tokens if tier.max_tokens is not None else "unset"
     num_predict = tier.max_tokens if tier.provider == "ollama" else "unset"
@@ -242,7 +309,10 @@ def _invoke_llm(llm, messages, state: DCipherState, role: str, tier, purpose: st
         raise
     duration = time.monotonic() - start
     response_text = _extract_message_text(response)
-    if not response_text.strip():
+    raw_response_chars = len(response_text or "")
+    refusal_present, refusal_text = _extract_refusal_data(response)
+    if not response_text.strip() or refusal_present:
+        reason = "refusal" if refusal_present else "empty"
         _log_event(
             state,
             "llm_empty_response",
@@ -250,16 +320,19 @@ def _invoke_llm(llm, messages, state: DCipherState, role: str, tier, purpose: st
             purpose=purpose,
             provider=tier.provider,
             model=tier.model,
+            reason=reason,
         )
         _log_event(
             state,
             "llm_empty_response_detail",
             role=role,
             purpose=purpose,
+            reason=reason,
             **_summarize_llm_response(response),
         )
-        response = _fallback_llm_response(role, state)
-        response_text = _extract_message_text(response)
+        if fallback_on_empty:
+            response = _fallback_llm_response(role, state)
+            response_text = _extract_message_text(response)
     try:
         if response_text and response_text != getattr(response, "content", ""):
             response = response.model_copy(update={"content": response_text})
@@ -282,6 +355,7 @@ def _invoke_llm(llm, messages, state: DCipherState, role: str, tier, purpose: st
         purpose=purpose,
         duration_s=round(duration, 3),
         response_chars=len(response_text or ""),
+        raw_response_chars=raw_response_chars,
     )
     return response
 
@@ -338,15 +412,20 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
     executor_tiers = load_tiers("executor")
     verifier_tiers = load_tiers("verifier")
     llm_cache: dict[tuple[str, str, str, int | None], object] = {}
+    tiers_by_role = {
+        "planner": planner_tiers,
+        "executor": executor_tiers,
+        "verifier": verifier_tiers,
+    }
 
-    def _get_llm(role: str, state: DCipherState):
-        if role == "planner":
-            tiers = planner_tiers
-        elif role == "executor":
-            tiers = executor_tiers
+    def _get_llm(role: str, state: DCipherState, force_idx: int | None = None):
+        tiers = tiers_by_role.get(role) or []
+        if not tiers:
+            tiers = [load_tiers(role)[0]]
+        if force_idx is None:
+            idx = select_tier_index(state, tiers, role)
         else:
-            tiers = verifier_tiers
-        idx = select_tier_index(state, tiers, role)
+            idx = max(0, min(force_idx, len(tiers) - 1))
         tier = tiers[idx]
         key = (role, tier.provider, tier.model, tier.max_tokens)
         llm = llm_cache.get(key)
@@ -354,6 +433,79 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
             llm = _init_llm(tier.provider, tier.model, role=role, max_tokens=tier.max_tokens)
             llm_cache[key] = llm
         return llm, tier, idx
+
+    def _invoke_with_fallback(
+        role: str,
+        messages: list,
+        purpose: str,
+        llm,
+        tier,
+        tier_idx: int,
+    ) -> AIMessage:
+        response = _invoke_llm(
+            llm,
+            messages,
+            state,
+            role,
+            tier,
+            purpose,
+            fallback_on_empty=False,
+        )
+        needs_retry, reason = _response_needs_retry(response)
+        if not needs_retry:
+            return response
+
+        tiers = tiers_by_role.get(role, [])
+        _log_event(
+            state,
+            "llm_retry",
+            role=role,
+            purpose=purpose,
+            reason=reason,
+            from_tier=tier_idx,
+            to_tier=min(tier_idx + 1, max(len(tiers) - 1, 0)),
+        )
+        if tier_idx < len(tiers) - 1:
+            next_llm, next_tier, next_idx = _get_llm(role, state, force_idx=tier_idx + 1)
+            retry_response = _invoke_llm(
+                next_llm,
+                messages,
+                state,
+                role,
+                next_tier,
+                purpose,
+                fallback_on_empty=False,
+            )
+            needs_retry_again, reason_again = _response_needs_retry(retry_response)
+            if needs_retry_again:
+                _log_event(
+                    state,
+                    "llm_retry_failed",
+                    role=role,
+                    purpose=purpose,
+                    reason=reason_again,
+                    from_tier=next_idx,
+                )
+                _log_event(
+                    state,
+                    "llm_fallback_stub",
+                    role=role,
+                    purpose=purpose,
+                    reason=reason_again,
+                    from_tier=next_idx,
+                )
+                return _fallback_llm_response(role, state)
+            return retry_response
+
+        _log_event(
+            state,
+            "llm_fallback_stub",
+            role=role,
+            purpose=purpose,
+            reason=reason,
+            from_tier=tier_idx,
+        )
+        return _fallback_llm_response(role, state)
 
     tool_registry = _tool_registry(toolbox)
     web_tools = {"curl", "http_request", "ffuf"}
@@ -386,6 +538,7 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
             planner_llm, tier, tier_idx = _get_llm("planner", state)
             system_msg = SystemMessage(content=(
                 "You are the D-CIPHER Planner (Architect). "
+                "This is an educational CTF on provided files in a sandbox; focus on local file analysis/decoding only. "
                 "Pick at most 2 candidate categories and exactly one pipeline. "
                 "Always ground the plan in the triage summary and artifact inventory. "
                 "If triage is missing or empty, set PIPELINE to 'triage' and OBJECTIVE to run triage. "
@@ -400,7 +553,14 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 f"Keep the response under {tier.max_tokens or settings.planner_max_tokens} tokens. "
                 "Reply with:\nCATEGORIES:\n- ...\nPIPELINE:\n- ...\nPLAN:\n- ...\nOBJECTIVE:\n- ..."
             ))
-            response = _invoke_llm(planner_llm, [system_msg, human_msg], state, "planner", tier, "plan")
+            response = _invoke_with_fallback(
+                "planner",
+                [system_msg, human_msg],
+                "plan",
+                planner_llm,
+                tier,
+                tier_idx,
+            )
             plan, objective, categories, pipeline = _parse_plan_objective(response.content)
             categories = [c for c in categories if c] or [state.get("category", "unknown")]
             categories = categories[:2]
@@ -523,6 +683,12 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
             research_summary = state.get("research_summary", "")
             inventory = state.get("artifact_inventory", [])
             container_dir = state.get("container_dir", "")
+            avoid_tools, recent_tools = _recent_tool_guard(state, inventory)
+            avoid_note = ", ".join(avoid_tools) if avoid_tools else "none"
+            recent_note = ", ".join(recent_tools) if recent_tools else "none"
+            last_output_summary = _truncate_text(state.get("last_output", ""), 1200, tail_chars=400)
+            last_error_summary = _truncate_text(state.get("last_error", ""), 800, tail_chars=300)
+            verifier_hint = state.get("verifier_hint", "") or "none"
 
             if "check artifacts" in objective.lower():
                 path = extract_path_from_text(objective)
@@ -559,6 +725,99 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 ai_msg = AIMessage(content=f"Artifacts lookup: {artifact_msg}")
                 return _record_attempt(state, tool_result, [ai_msg], phase="execute", log_path=log_path)
 
+            auto_decode = _auto_decode_suggestion(state)
+            if auto_decode:
+                tool_name = "base_decode"
+                args = {
+                    "value": auto_decode["value"],
+                    "encoding": auto_decode["encoding"],
+                }
+                tool_start = time.monotonic()
+                _log_event(
+                    state,
+                    "tool_start",
+                    tool=tool_name,
+                    phase="execute",
+                    args=redact(args),
+                )
+                try:
+                    tool_result = tool_registry[tool_name](**args)
+                except Exception as exc:
+                    tool_result = ToolResult(
+                        tool=tool_name,
+                        command=json.dumps(args),
+                        stdout="",
+                        stderr=f"Auto-decode failed: {exc}",
+                        exit_code=2,
+                    )
+                tool_duration = time.monotonic() - tool_start
+                _log_event(
+                    state,
+                    "tool_end",
+                    tool=tool_result.tool,
+                    phase="execute",
+                    duration_s=round(tool_duration, 3),
+                    exit_code=tool_result.exit_code,
+                    stdout_head=redact(head_lines(tool_result.stdout, DEBUG_TOOL_PREVIEW_LINES)),
+                    stderr_head=redact(head_lines(tool_result.stderr, DEBUG_TOOL_PREVIEW_LINES)),
+                )
+                log_path = _persist_tool_output(state, tool_result, phase="execute")
+                tool_result.log_path = log_path
+                output_msg = HumanMessage(content=_format_tool_output(tool_result, log_path))
+                updates = _record_attempt(state, tool_result, [output_msg], phase="execute", log_path=log_path)
+                updates["last_decode"] = {
+                    "value": auto_decode["value"],
+                    "encoding": auto_decode["encoding"],
+                }
+                updates.setdefault("reasoning_log", []).append(
+                    f"Auto-decode: {auto_decode['reason']} ({auto_decode['encoding']})"
+                )
+                if trajectory_logger:
+                    trajectory_logger.log("execute", {"tool": tool_result.tool, "command": tool_result.command, "log_path": log_path})
+                return updates
+
+            fallback = _fallback_tool_for_failure(state, inventory, avoid_tools)
+            if fallback:
+                tool_name = fallback["tool"]
+                args = fallback["args"]
+                tool_start = time.monotonic()
+                _log_event(
+                    state,
+                    "tool_start",
+                    tool=tool_name,
+                    phase="execute",
+                    args=redact(args),
+                )
+                try:
+                    tool_result = tool_registry[tool_name](**args)
+                except Exception as exc:
+                    tool_result = ToolResult(
+                        tool=tool_name,
+                        command=json.dumps(args),
+                        stdout="",
+                        stderr=f"Fallback tool failed: {exc}",
+                        exit_code=2,
+                    )
+                tool_duration = time.monotonic() - tool_start
+                _log_event(
+                    state,
+                    "tool_end",
+                    tool=tool_result.tool,
+                    phase="execute",
+                    duration_s=round(tool_duration, 3),
+                    exit_code=tool_result.exit_code,
+                    stdout_head=redact(head_lines(tool_result.stdout, DEBUG_TOOL_PREVIEW_LINES)),
+                    stderr_head=redact(head_lines(tool_result.stderr, DEBUG_TOOL_PREVIEW_LINES)),
+                )
+                log_path = _persist_tool_output(state, tool_result, phase="execute")
+                tool_result.log_path = log_path
+                output_msg = HumanMessage(content=_format_tool_output(tool_result, log_path))
+                updates = _record_attempt(state, tool_result, [output_msg], phase="execute", log_path=log_path)
+                updates.setdefault("reasoning_log", []).append(fallback.get("reason", "Fallback tool invoked."))
+                if trajectory_logger:
+                    trajectory_logger.log("execute", {"tool": tool_result.tool, "command": tool_result.command, "log_path": log_path})
+                return updates
+
             executor_llm, tier, tier_idx = _get_llm("executor", state)
             system_msg = SystemMessage(content=(
                 "You are the D-CIPHER Executor (Operator). Pick exactly one tool call. "
@@ -570,6 +829,7 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 "Use real paths from the ARTIFACT INVENTORY; never use placeholders like /path/to/file. "
                 "If the objective is to inspect an archive, use extract_archive with the archive path. "
                 "Tool manuals exist in the local KB; use them to choose correct flags/args. "
+                f"Recent tools: {recent_note}. Avoid repeating tools: {avoid_note} unless a new path is explicitly required. "
                 f"Keep the response under {tier.max_tokens or settings.executor_max_tokens} tokens. "
                 f"Tools: {', '.join(tool_registry.keys())}"
             ))
@@ -578,10 +838,22 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 f"URL:\n{url or 'none'}\n\n"
                 f"CONTAINER_DIR:\n{container_dir or 'unknown'}\n\n"
                 f"RESEARCH SUMMARY:\n{research_summary or 'none'}\n\n"
-                f"ARTIFACT INVENTORY:\n{_format_inventory_for_prompt(inventory)}"
+                f"LAST OUTPUT (summary):\n{last_output_summary or 'none'}\n\n"
+                f"LAST ERROR (summary):\n{last_error_summary or 'none'}\n\n"
+                f"VERIFIER HINT:\n{verifier_hint}\n\n"
+                f"ARTIFACT INVENTORY:\n{_format_inventory_for_prompt(inventory)}\n\n"
+                f"RECENT TOOLS:\n{recent_note}\n"
+                f"AVOID REPEATS:\n{avoid_note}"
             ))
 
-            response = _invoke_llm(executor_llm, [system_msg, human_msg], state, "executor", tier, "execute_select")
+            response = _invoke_with_fallback(
+                "executor",
+                [system_msg, human_msg],
+                "execute_select",
+                executor_llm,
+                tier,
+                tier_idx,
+            )
             tool_name, args, raw_cmd = _parse_tool_call(response.content)
             tool_name = _normalize_tool_name(tool_name)
             executor_messages = [response]
@@ -676,7 +948,15 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 phase="execute",
                 args=redact(args),
             )
-            if tool_name in web_tools and not url:
+            if _should_block_redundant_tool(tool_name, args, avoid_tools):
+                tool_result = ToolResult(
+                    tool=tool_name,
+                    command=json.dumps(args),
+                    stdout="",
+                    stderr="Redundant list_dir blocked (triage already done). Choose a different tool or a new path.",
+                    exit_code=2,
+                )
+            elif tool_name in web_tools and not url:
                 tool_result = ToolResult(
                     tool=tool_name,
                     command=json.dumps(args),
@@ -799,6 +1079,15 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 "flag_hits": new_hits,
                 "reasoning_log": [observation]
             }
+            auto_decode = None
+            auto_decode_hint = "none"
+            if not flags:
+                auto_decode = _auto_decode_candidate(output)
+                if auto_decode:
+                    auto_decode_hint = f"{auto_decode['encoding']}: {preview_text(auto_decode['value'], 120)}"
+                    updates.setdefault("reasoning_log", []).append(
+                        f"Auto-decode hint: {auto_decode['reason']} ({auto_decode['encoding']})"
+                    )
 
             if connector:
                 all_hits = list(state.get("flag_hits", [])) + new_hits
@@ -841,11 +1130,26 @@ def build_graph(toolbox: Toolbox, connector=None, trajectory_logger: TrajectoryL
                 f"STDOUT:\n{stdout}\n"
                 f"STDERR:\n{stderr}\n"
                 f"AUTO_HINT: {auto_hint or 'none'}\n"
+                f"AUTO_DECODE_HINT: {auto_decode_hint}\n"
                 f"FLAGS: {state.get('flag_candidates')}\n"
                 f"ARTIFACT INVENTORY: {_format_inventory_for_prompt(state.get('artifact_inventory', []))}\n"
             ))
 
-            response = _invoke_llm(verifier_llm, [system_msg, human_msg], state, "verifier", tier, "verify")
+            response = _invoke_with_fallback(
+                "verifier",
+                [system_msg, human_msg],
+                "verify",
+                verifier_llm,
+                tier,
+                tier_idx,
+            )
+            verifier_preview = preview_text(response.content or "", 220)
+            if auto_decode and auto_decode_hint != "none":
+                if verifier_preview:
+                    verifier_preview = f"{verifier_preview} | AutoDecode: {auto_decode_hint}"
+                else:
+                    verifier_preview = f"AutoDecode: {auto_decode_hint}"
+            updates["verifier_hint"] = verifier_preview
             updates.setdefault("messages", []).append(response)
             updates.setdefault("reasoning_log", []).append(f"Verifier: {response.content[:200]}")
             if trajectory_logger:
@@ -1246,7 +1550,7 @@ def _budget_exceeded(state: DCipherState) -> str | None:
 
 def _is_disallowed_command(command: str) -> bool:
     lowered = (command or "").lower()
-    banned = ["nmap", "masscan", "zmap", "rustscan", "sqlmap"]
+    banned = ["nmap", "masscan", "zmap", "rustscan"]
     return any(re.search(rf"\\b{re.escape(tool)}\\b", lowered) for tool in banned)
 
 
@@ -1640,6 +1944,162 @@ def _auto_failure_hint(state: DCipherState) -> str | None:
     if exit_code == 124 or "timed out" in stderr:
         return "Command timed out. Consider narrowing scope, adding filters, or increasing timeout."
     return None
+
+
+def _recent_tool_guard(state: DCipherState, inventory: list[dict], window: int = 3) -> tuple[list[str], list[str]]:
+    attempts = state.get("attempt_history") or []
+    recent = attempts[-window:]
+    tools = [attempt.get("tool") for attempt in recent if attempt.get("tool")]
+    avoid: list[str] = []
+    counts = Counter(tools)
+    for tool, count in counts.items():
+        if count >= 2:
+            avoid.append(tool)
+    if state.get("triage_done") and inventory:
+        avoid.append("list_dir")
+    return _dedupe_list(avoid), tools
+
+
+def _should_block_redundant_tool(tool_name: str, args: dict, avoid_tools: list[str]) -> bool:
+    if tool_name not in avoid_tools:
+        return False
+    if tool_name == "list_dir":
+        path = (args or {}).get("path") or "."
+        return str(path).strip() in {"", ".", "./"}
+    return False
+
+
+def _extract_path_from_command(command: str) -> str:
+    if not command:
+        return ""
+    quoted = re.findall(r"['\"](/[^'\"]+)['\"]", command)
+    if quoted:
+        return quoted[-1]
+    bare = re.findall(r"(/[^\\s]+)", command)
+    return bare[-1] if bare else ""
+
+
+def _fallback_tool_for_failure(
+    state: DCipherState,
+    inventory: list[dict],
+    avoid_tools: list[str],
+) -> dict | None:
+    if state.get("last_exit_code", 0) == 0:
+        return None
+    attempts = state.get("attempt_history") or []
+    last_attempt = attempts[-1] if attempts else {}
+    if last_attempt.get("phase") != "execute":
+        return None
+    last_tool = str(last_attempt.get("tool") or "")
+    if not last_tool or last_tool in {"bash", "artifacts"}:
+        return None
+
+    fallback_map = {
+        "strings": ["file_info", "read_file"],
+        "file_info": ["strings", "read_file"],
+        "read_file": ["strings", "file_info"],
+        "binwalk": ["strings", "file_info"],
+        "exiftool": ["strings", "binwalk"],
+        "pdfinfo": ["pdftotext", "strings"],
+        "pdftotext": ["pdfinfo", "strings"],
+        "checksec": ["strings", "file_info"],
+    }
+    options = fallback_map.get(last_tool, [])
+    if not options:
+        return None
+
+    command = str(last_attempt.get("command") or state.get("last_command") or "")
+    path = _extract_path_from_command(command)
+    if not path and inventory:
+        paths = [entry.get("path") for entry in inventory if isinstance(entry, dict) and entry.get("path")]
+        if len(paths) == 1:
+            path = paths[0]
+    if not path:
+        return None
+
+    for candidate in options:
+        if candidate == last_tool:
+            continue
+        if candidate in avoid_tools:
+            continue
+        return {
+            "tool": candidate,
+            "args": {"path": path},
+            "reason": f"Fallback after {last_tool} failure.",
+        }
+    return None
+
+
+def _find_candidate(
+    pattern: re.Pattern,
+    text: str,
+    *,
+    prefer_flag: bool = True,
+    even_length: bool = False,
+    mod4: bool = False,
+    max_len: int = 4096,
+) -> str | None:
+    if not text:
+        return None
+
+    def valid(value: str) -> bool:
+        if max_len and len(value) > max_len:
+            return False
+        if even_length and len(value) % 2 != 0:
+            return False
+        if mod4 and len(value) % 4 != 0:
+            return False
+        return True
+
+    if prefer_flag:
+        for line in text.splitlines():
+            if "flag" in line.lower():
+                for match in pattern.finditer(line):
+                    value = match.group(0)
+                    if valid(value):
+                        return value
+
+    candidates = []
+    for match in pattern.finditer(text):
+        value = match.group(0)
+        if valid(value):
+            candidates.append(value)
+    if not candidates:
+        return None
+    return max(candidates, key=len)
+
+
+def _auto_decode_candidate(text: str) -> dict | None:
+    if not text:
+        return None
+    hex_value = _find_candidate(HEX_CANDIDATE_RE, text, even_length=True)
+    if hex_value:
+        return {
+            "encoding": "hex",
+            "value": hex_value,
+            "reason": "Detected hex string in output.",
+        }
+    b64_value = _find_candidate(BASE64_CANDIDATE_RE, text, mod4=True)
+    if b64_value:
+        return {
+            "encoding": "base64",
+            "value": b64_value,
+            "reason": "Detected base64 string in output.",
+        }
+    return None
+
+
+def _auto_decode_suggestion(state: DCipherState) -> dict | None:
+    suggestion = _auto_decode_candidate(state.get("last_output", ""))
+    if not suggestion:
+        return None
+    last_decode = state.get("last_decode") or {}
+    if (
+        last_decode.get("value") == suggestion.get("value")
+        and last_decode.get("encoding") == suggestion.get("encoding")
+    ):
+        return None
+    return suggestion
 
 
 def _extract_flags(text: str, flag_format: str) -> list[str]:

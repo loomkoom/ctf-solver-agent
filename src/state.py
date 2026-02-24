@@ -25,6 +25,15 @@ class FlagHit(TypedDict):
     log_path: str
 
 
+class CommandRecord(TypedDict):
+    cmd: str
+    stdout: str
+    stderr: str
+    exit_code: int
+    tool: str
+    log_path: str
+
+
 class CTFState(TypedDict):
     challenge_id: str
     challenge_name: str
@@ -55,8 +64,11 @@ class DCipherState(CTFState):
     last_error: str
     last_exit_code: int
     last_log_path: str
+    verifier_hint: str
+    last_decode: dict
     flag_candidates: list[str]
     flag_hits: Annotated[list[FlagHit], add]
+    command_history: Annotated[list[dict], add]
     iteration: int
     submitted_flags: list[str]
     done: bool

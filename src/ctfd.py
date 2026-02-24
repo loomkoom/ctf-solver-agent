@@ -86,7 +86,10 @@ class CTFdConnector:
         saved = []
 
         for ctf_file in self.get_challenge_files(challenge_id):
-            file_url = f"{self.base_url}/files/{ctf_file.url}"
+            if not ctf_file.url.startswith("http"):
+                file_url = f"{self.base_url}/files/{ctf_file.url}"
+            else:
+                file_url = ctf_file.url
             data = self.session.get(file_url , timeout=self.timeout_s)
             if not data.ok:
                 continue

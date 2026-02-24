@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from src.agent import build_graph
+from src.agent.react_agent import build_react_graph
 from src.config import settings
 from src.ctfd import CTFdConnector
 from src.debug_log import debug_log
@@ -53,7 +53,7 @@ def run_solver(
         run_id=run_id,
         enabled=settings.debug,
     )
-    graph = build_graph(toolbox, connector=connector, trajectory_logger=trajectory_logger)
+    graph = build_react_graph(toolbox, connector=connector, trajectory_logger=trajectory_logger)
 
     state: DCipherState = {
         "challenge_id": str(challenge_id),
@@ -82,8 +82,11 @@ def run_solver(
         "last_error": "",
         "last_exit_code": 0,
         "last_log_path": "",
+        "verifier_hint": "",
+        "last_decode": {},
         "flag_candidates": [],
         "flag_hits": [],
+        "command_history": [],
         "iteration": 0,
         "submitted_flags": [],
         "done": False,

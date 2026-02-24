@@ -1,0 +1,85 @@
+{
+  "challenge_id": "2",
+  "challenge_name": "allstar",
+  "category": "misc",
+  "flag_candidates": [],
+  "flag_hits": [],
+  "submitted_flags": [
+    "IGCTF{GLITCHING}"
+  ],
+  "iteration": 5,
+  "done": true,
+  "attempts": [
+    {
+      "step": 1,
+      "phase": "triage",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "find /challenge/ctfd/2 -maxdepth 1 -type f -print0 | xargs -0 -r file",
+      "stdout": "/challenge/ctfd/2/allstar.zip: Zip archive data, made by v2.0, extract using at least v2.0, last modified Feb 05 2022 22:55:12, uncompressed size 2149, method=deflate\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\2\\logs\\bash_20260224T005109660126Z.txt"
+    },
+    {
+      "step": 2,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "7z x /challenge/ctfd/2/allstar.zip -o/challenge",
+      "stdout": "\n7-Zip 25.01 (x64) : Copyright (c) 1999-2025 Igor Pavlov : 2025-08-03\n 64-bit locale=C.UTF-8 Threads:8 OPEN_MAX:1048576, ASM\n\nScanning the drive for archives:\n1 file, 1093 bytes (2 KiB)\n\nExtracting archive: /challenge/ctfd/2/allstar.zip\n--\nPath = /challenge/ctfd/2/allstar.zip\nType = zip\nPhysical Size = 1093\n\nEverything is Ok\n\nFiles: 2\nSize:       2266\nCompressed: 1093\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\2\\logs\\bash_20260224T005111017480Z.txt"
+    },
+    {
+      "step": 3,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "ls /challenge/allstar",
+      "stdout": "",
+      "stderr": "ls: cannot access '/challenge/allstar': No such file or directory\n",
+      "exit_code": 2,
+      "log_path": "runs\\2\\logs\\bash_20260224T005112043260Z.txt"
+    },
+    {
+      "step": 4,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "strings /challenge/allstar/lyrics.txt",
+      "stdout": "",
+      "stderr": "strings: '/challenge/allstar/lyrics.txt': No such file\n",
+      "exit_code": 1,
+      "log_path": "runs\\2\\logs\\bash_20260224T005112176268Z.txt"
+    },
+    {
+      "step": 5,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "ls /challenge/",
+      "stdout": "README.md\nbench\nctfd\nlyrics.txt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\2\\logs\\bash_20260224T005113040995Z.txt"
+    },
+    {
+      "step": 6,
+      "phase": "execute",
+      "objective": "Initial reconnaissance",
+      "tool": "bash",
+      "command": "strings /challenge/lyrics.txt",
+      "stdout": "somebody once told me the world is gonna roll me\nI ain't the sharpest tool in the shed\nshe was lookinG kind of dumb with her finger and her thumb\nin the shape of an \"l\" on her forehead\nwell the years start Coming and They don't stop coming\nFed to the rules and i hit the ground running{\ndIdN't make sense not to live for fun\nyour brain gets smart but your head gets dumb\nso much to do, so much to see\nso what's wrong with taking the back streets?\nyou'll never know if you don't go\nyou'll never shine if you don't glow\nhey now, you're an all-star, get your game on, go Play\nhey now, you're a rock star, get the show on, get paid\nand aLl thAt glItters is gold\noNly ShootInG stars break the mold\nit's a cool place and tHey say iT gets colder\nyou're bundled up now, wait 'til you get older\nbut the meteor meN beg to differ\njudging by the hole in the satellite picture\nthe ice we skate is getting pretty thin\nthe water's getting warm sO you might as well swim\nmy world's on fire, how about yours?\nthat's the way i like it and i'll never get bored\nhey now, you're an all-star, geT your game on, go play\nhey now, you're A rock star, get the show on, get paid\nall that glitters is gold\nonly shooting stars break the mold\nhey now, you're an all-sTar, get your game on, go play\nhey now, you're a rock star, get the show, on get paid\nand all that glitters is gold\nonly shooting staRs\nsomebody once asked could i spare some change for gas?\ni need to get myself away from this place\ni said, \"yup\" what a cOncept\ni could use a little fuel myself\nand we could all use a littLe change\nwell, the years start coming and they don't stop coming\nfed to the rules and i hit the ground running\ndidn't make sense not to live for fun\nyour brain gets smart but your head gets dumb\nso much to do, so much to see\nso what's wrong with taking the back streets?\nyou'll never know if you don't go (go!)\nyou'll never shine if you don't gLow\nhey now, you're an all-star, get your game on, go play\nhey now, you're a rock star, get the show on, get paid\nand all that glitters is} gold\nonly shooting stars break the mold\nand all that glitters is gold\nonly shooting stars break the mold\n",
+      "stderr": "",
+      "exit_code": 0,
+      "log_path": "runs\\2\\logs\\bash_20260224T005114145842Z.txt"
+    }
+  ],
+  "reasoning_log": [],
+  "run_dir": "runs\\2",
+  "tool_calls": 6,
+  "phase_cycles": 0,
+  "category_pivots": 0
+}

@@ -19,6 +19,7 @@ SKIP_FILES = {
     "writeup.txt",
     "solution.md",
     "solution.txt",
+    "challenge.yml"
 }
 
 DEFAULT_SKIP_DIRS = {

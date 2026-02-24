@@ -19,7 +19,7 @@ fi
 # 3. Check for Ollama and Model
 if command -v ollama &> /dev/null; then
     echo "Pulling Qwen model (if not present)..."
-    ollama pull qwen2.5-coder:7b
+    ollama pull qwen2.5-coder:14b-instruct
 else
     echo "Ollama not found. If using a local model, please install it first."
 fi
@@ -30,17 +30,15 @@ uv sync
 
 # Build and Start Sandbox
 echo "Initializing Kali Sandbox..."
-# Ensure any old container is removed
-docker rm -f ctf-sandbox 2>/dev/null || true
-docker build -t ctf-sandbox -f src/sandbox/DOCKERFILE .
-docker run -d --name ctf-sandbox ctf-sandbox sleep infinity
+docker compose build ctf-sandbox
+docker compose up -d ctf-sandbox
 
 # Initialize Knowledge Base (RAG)
 echo "Initializing Knowledge Base..."
-if [ -d "./data/knowledge_base/writeups" ]; then
-    uv run python -c "from src.tools.rag import ingest_writeups; ingest_writeups('./data/knowledge_base/writeups')"
+if [ -d "./data/knowledge_base" ]; then
+    uv run python -c "from src.rag.rag import ingest_knowledge_base; ingest_knowledge_base('./data/knowledge_base', force=False, mode='all')"
 else
-    echo "No writeups found in ./data/knwoledge_base/writeups. Skipping indexing."
+    echo "No knowledge_base found in ./data/knowledge_base. Skipping indexing."
 fi
 
-echo "Setup complete! Run your agent with: uv run python src/main.py"
+echo "Setup complete! Run your agent with: uv run ig-ctf-solver --help"

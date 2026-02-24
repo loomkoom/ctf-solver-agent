@@ -12,7 +12,7 @@ This agent solves **Jeopardy-style CTF challenges** (crypto, forensics/stego, re
 Non-goals:
 - No network pentesting / machine hacking / port scanning (NO nmap/masscan).
 - No “autonomous red team” behavior.
-- No heavy multi-agent infrastructure in the 48h prototype (use phased single-agent loop).
+- No heavy multi-agent infrastructure in the 48h prototype (use a single ReAct agent loop).
 
 ## 1. Primary Objective
 > Reliably solve challenges end-to-end within strict time/tool budgets, producing verifiable flags and structured logs suitable for competition submission.
@@ -30,6 +30,9 @@ The agent logic should follow a **Dynamic Research & Development (R&D) cycle**.
 While implementation can vary (LangGraph, Headless SWE-agent, or custom state machines), the logic must follow these phases:
 
 **D-CIPHER-style phases** on top of a **SWE-agent-like Agent-Computer Interface (ACI)** seems most aligned with our goals.
+
+### Current Agent Architecture (ReAct)
+The runtime graph uses a single ReAct agent node with only `bash` and `submit_flag` tools. The node loops LLM → tool calls → tool results until a flag is found or budgets are hit. Initial context includes `file` output from `/challenge`, and full message history is preserved across the run.
 
 ### Phases (must be explicit in logs/state)
 1. **Architect (Strategy):** Breaks the problem into sub-tasks (e.g., "Enumerate services," "Reverse binary"). It identifies expected flag formats (e.g., `IGCTF{}`, `CSCBE{}`).
@@ -62,7 +65,7 @@ While implementation can vary (LangGraph, Headless SWE-agent, or custom state ma
 
 * **Do Not Reinvent the Wheel:** Leverage established patterns from **D-CIPHER**, **SWE-agent**, and **Deadend-CLI** etc (see `RESOURCES.md`) for terminal interfaces and feedback-driven iteration.
 * **Sandbox Isolation:** All commands MUST run in the **Dockerized Kali Linux** environment. Never execute challenge binaries on the host.
-* **Dynamic Flag Detection:** Use the `flag_format` variable. If unknown, use a broad regex fallback: `(?:IGCTF|flag|CSCBE|UCTF|ctf)\{.*?\}`.
+* **Dynamic Flag Detection:** Use the `flag_format` variable. If unknown, use a broad regex fallback: `(?:flag|IGCTF|ctf|picoCTF|HTB|TBTL)\{[^}]{1,200}\}`.
 * **Timeouts & Bloat:** Tool calls must have hard 30s timeouts. Large outputs must be summarized before being passed back to the LLM to preserve context.
 * **Self-Healing:** If a command fails (e.g., `Exit Code 127`), the agent must analyze why and suggest a fix (e.g., installing a missing tool or changing parameters) rather than repeating the error.
 * If an endpoint is given, interact **only with that endpoint** (no scanning other hosts/ports).
